@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 clap.workspace = true
 ralph-core = { path = "../ralph-core" }
+ralph-beads = { path = "../ralph-beads" }

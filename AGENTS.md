@@ -20,17 +20,19 @@ bd sync               # Sync with git
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **PUSH TO REMOTE** - This is MANDATORY:
+3. If you learn anything important, update the AGENTS.md nearest to the finding
+4. If you implemented a user story, make sure a markdown file in specs/ documents it. If you create a spec file, update the lookup table at specs/README.md
+5. **Update issue status** - Close finished work, update in-progress items
+6. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
    bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed AND pushed
-7. **Hand off** - Provide context for next session
+7. **Clean up** - Clear stashes, prune remote branches
+8. **Verify** - All changes committed AND pushed
+9. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
 - Work is NOT complete until `git push` succeeds

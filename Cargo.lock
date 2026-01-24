@@ -139,6 +139,7 @@ name = "ralph"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "ralph-beads",
  "ralph-core",
 ]
 
@@ -149,6 +150,9 @@ version = "0.1.0"
 [[package]]
 name = "ralph-core"
 version = "0.1.0"
+dependencies = [
+ "ralph-tmux",
+]
 
 [[package]]
 name = "ralph-tmux"
