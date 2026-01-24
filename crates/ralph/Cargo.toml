@@ -7,3 +7,4 @@ edition.workspace = true
 clap.workspace = true
 ralph-core = { path = "../ralph-core" }
 ralph-beads = { path = "../ralph-beads" }
+signal-hook.workspace = true

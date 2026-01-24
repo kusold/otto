@@ -1,6 +1,10 @@
 use clap::Parser;
 use ralph_beads::{has_ready_tasks, BeadsError};
 use ralph_core::{launch_agent_default, AgentError};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Global shutdown flag, set by signal handlers
+static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Ralph - Autonomous agent runner for beads tasks
 ///
@@ -19,8 +23,38 @@ struct Args {
     watch: bool,
 }
 
+/// Sets up signal handlers for SIGINT (Ctrl+C) and SIGTERM.
+///
+/// When a signal is received, the shutdown flag is set to true, which
+/// will cause the main loop to exit gracefully after the current agent finishes.
+fn setup_signal_handlers() {
+    use signal_hook::iterator::Signals;
+
+    // We need to fork the signal handling to a separate thread
+    // to avoid restrictions on what can be done in a signal handler
+    let mut signals = Signals::new([signal_hook::consts::SIGINT, signal_hook::consts::SIGTERM])
+        .expect("failed to register signal handler");
+
+    std::thread::spawn(move || {
+        for sig in signals.forever() {
+            match sig {
+                signal_hook::consts::SIGINT | signal_hook::consts::SIGTERM => {
+                    if !SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+                        SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+                        println!("\nShutdown signal received, waiting for agent to finish...");
+                    }
+                }
+                _ => {}
+            }
+        }
+    });
+}
+
 fn main() {
     let args = Args::parse();
+
+    // Set up signal handlers for graceful shutdown
+    setup_signal_handlers();
 
     if args.watch {
         println!("Ralph running in watch mode (infinite loop)");
@@ -34,6 +68,12 @@ fn main() {
 
 fn run_single_pass() {
     loop {
+        // Check if shutdown was requested
+        if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+            println!("Shutting down gracefully");
+            return;
+        }
+
         // Check if there are ready beads
         match has_ready_tasks() {
             Ok(true) => {
@@ -50,6 +90,12 @@ fn run_single_pass() {
                         eprintln!("Error launching agent: {}", e);
                         return;
                     }
+                }
+
+                // Check for shutdown again after agent finishes
+                if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+                    println!("Shutting down gracefully");
+                    return;
                 }
             }
             Ok(false) => {
@@ -71,6 +117,12 @@ fn run_single_pass() {
 
 fn run_watch_loop() {
     loop {
+        // Check if shutdown was requested
+        if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+            println!("Shutting down gracefully");
+            return;
+        }
+
         // Check if there are ready beads
         match has_ready_tasks() {
             Ok(true) => {
@@ -88,11 +140,25 @@ fn run_watch_loop() {
                         // In watch mode, continue on errors
                     }
                 }
+
+                // Check for shutdown again after agent finishes
+                if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+                    println!("Shutting down gracefully");
+                    return;
+                }
             }
             Ok(false) => {
                 // No ready beads, wait a bit before checking again
                 println!("No ready beads, waiting...");
-                std::thread::sleep(std::time::Duration::from_secs(10));
+
+                // Sleep in 1-second intervals to allow shutdown checking
+                for _ in 0..10 {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+                        println!("Shutting down gracefully");
+                        return;
+                    }
+                }
             }
             Err(BeadsError::NotInitialized) => {
                 eprintln!("Error: beads not initialized (no .beads directory)");
@@ -101,7 +167,15 @@ fn run_watch_loop() {
             Err(e) => {
                 eprintln!("Error checking for ready tasks: {}", e);
                 // In watch mode, continue on errors
-                std::thread::sleep(std::time::Duration::from_secs(10));
+
+                // Sleep in 1-second intervals to allow shutdown checking
+                for _ in 0..10 {
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+                        println!("Shutting down gracefully");
+                        return;
+                    }
+                }
             }
         }
     }
