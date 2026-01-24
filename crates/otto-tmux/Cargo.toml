@@ -1,5 +1,5 @@
 [package]
-name = "ralph-tmux"
+name = "otto-tmux"
 version.workspace = true
 edition.workspace = true
 

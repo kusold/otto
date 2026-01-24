@@ -1,10 +1,10 @@
 [package]
-name = "ralph"
+name = "otto"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 clap.workspace = true
-ralph-core = { path = "../ralph-core" }
-ralph-beads = { path = "../ralph-beads" }
+otto-core = { path = "../otto-core" }
+otto-beads = { path = "../otto-beads" }
 signal-hook.workspace = true

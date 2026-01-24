@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ralph", "crates/ralph-core", "crates/ralph-beads", "crates/ralph-tmux"]
+members = ["crates/otto", "crates/otto-core", "crates/otto-beads", "crates/otto-tmux"]
 
 [workspace.package]
 version = "0.1.0"
