@@ -93,7 +93,7 @@ To watch the agent work, attach to the tmux session:
 tmux attach-session -t otto
 ```
 
-To detach without stopping Ralph:
+To detach without stopping Otto:
 - Press `Ctrl+B`, then `D` (the default tmux detach keybinding)
 
 ## How It Works

@@ -1,5 +1,5 @@
 {
-  description = "Ralph - CLI tool for managing development workflows";
+  description = "Otto - CLI tool for managing development workflows";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

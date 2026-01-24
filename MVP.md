@@ -33,7 +33,7 @@ Enable autonomous AFK (away from keyboard) coding by continuously running AI age
 #### 3. Beads Integration
 - Uses `bd ready` to check for available tasks
 - Agents are responsible for updating bead status via beads CLI
-- Ralph only checks if ready beads exist; doesn't track state
+- Otto only checks if ready beads exist; doesn't track state
 
 #### 4. Basic Output
 - Simple console output: "Starting agent...", "Agent finished", "No ready beads, exiting"
@@ -56,7 +56,7 @@ Enable autonomous AFK (away from keyboard) coding by continuously running AI age
 2. **Loop Runner**: Simple while loop that spawns agent processes and checks for ready beads
 3. **Tmux Integration**: Creates/reuses tmux session named `otto` for agent execution
 
-#### What Ralph Does NOT Have (by design)
+#### What Otto Does NOT Have (by design)
 - No monitoring/failure recovery
 - No plugin system
 - No configuration files
