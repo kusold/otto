@@ -94,7 +94,7 @@ pub fn get_claude_version() -> ClaudeResult<String> {
 /// - `false` otherwise
 pub fn is_claude_running() -> bool {
     Command::new("pgrep")
-        .arg("-f")
+        .arg("-x")
         .arg("claude")
         .output()
         .map(|output| output.status.success())
@@ -128,7 +128,10 @@ pub fn wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()> {
 /// Builds a Claude agent command from a prompt string.
 ///
 /// Constructs a claude command with the given prompt, including the
-/// `--dangerously-skip-permissions` flag and proper shell escaping.
+/// `--dangerously-skip-permissions` and `--print` flags for proper exit behavior.
+///
+/// The `--print` flag ensures Claude exits after completing the task instead of
+/// staying in interactive mode, which is critical for automated agent execution.
 ///
 /// # Arguments
 /// * `prompt` - The prompt string to pass to claude
@@ -136,7 +139,7 @@ pub fn wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()> {
 /// # Returns
 /// A shell command string that can be executed
 pub fn build_agent_prompt(prompt: &str) -> String {
-    format!("claude --dangerously-skip-permissions \"{}\"", prompt)
+    format!("claude --dangerously-skip-permissions --print \"{}\"", prompt)
 }
 
 /// Reads a prompt from a file, or returns the default prompt.
@@ -168,6 +171,7 @@ mod tests {
     fn test_build_agent_prompt() {
         let cmd = build_agent_prompt("test prompt");
         assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("--print"));
         assert!(cmd.contains("test prompt"));
     }
 
