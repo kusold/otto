@@ -8,25 +8,23 @@ Otto is a command-line tool that autonomously executes AI coding agents in a con
 
 ### Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        otto (CLI)                           │
-│  Main loop, signal handling, watch mode, graceful shutdown  │
-└─────────────────┬──────────────────────┬───────────────────┘
-                  │                      │
-          ┌───────▼──────────┐    ┌──────▼───────────┐
-          │   otto-beads     │    │   otto-core      │
-          │  Task checking   │    │  Agent           │
-          └──────────────────┘    │  orchestration   │
-                                  └──────┬───────────┘
-                                         │
-                         ┌───────────────┼───────────────┐
-                         │               │               │
-                 ┌───────▼───────┐ ┌────▼──────┐ ┌─────▼──────────┐
-                 │  otto-claude  │ │ otto-tmux │ │ (future:       │
-                 │  Claude CLI  │ │  Session  │ │  other agent    │
-                 │ interactions │ │ management│ │  providers)    │
-                 └──────────────┘ └───────────┘ └────────────────┘
+```mermaid
+flowchart TB
+    otto[otto<br/>CLI<br/>Main loop, signal handling,<br/>watch mode, graceful shutdown]
+
+    otto --> otto_beads[otto-beads<br/>Task checking]
+    otto --> otto_core[otto-core<br/>Agent orchestration]
+
+    otto_core --> otto_claude[otto-claude<br/>Claude Code CLI<br/>availability, monitoring,<br/>command construction]
+    otto_core --> otto_tmux[otto-tmux<br/>Session management]
+    otto_core --> future[(future:<br/>other agent providers)]
+
+    style otto fill:#e1f5fe
+    style otto_beads fill:#f3e5f5
+    style otto_core fill:#fff3e0
+    style otto_claude fill:#e8f5e9
+    style otto_tmux fill:#fce4ec
+    style future fill:#f5f5f5,stroke-dasharray: 5 5
 ```
 
 ## Crate Specifications
