@@ -1,9 +1,9 @@
 # Product Requirements Document (PRD)
 
-## Project: Ralph
+## Project: Otto
 
 ### Overview
-Ralph is a simple CLI program that runs AI coding agents in a loop. On each iteration, it launches an agent which picks a task from the beads system, works on it, then exits. Ralph repeats this until no ready tasks remain.
+Otto is a simple CLI program that runs AI coding agents in a loop. On each iteration, it launches an agent which picks a task from the beads system, works on it, then exits. Otto repeats this until no ready tasks remain.
 
 ### Vision
 Enable autonomous AFK (away from keyboard) coding by continuously running AI agents against a task queue. No complex orchestration—just a simple loop that lets agents work through tasks independently.
@@ -20,7 +20,7 @@ Enable autonomous AFK (away from keyboard) coding by continuously running AI age
 
 #### 1. Simple Loop
 - Run a simple loop: `while true; do launch_agent; check_tasks; done`
-- Launch coding agent in a tmux session named `ralph` (reuse same session each iteration)
+- Launch coding agent in a tmux session named `otto` (reuse same session each iteration)
 - Agent receives a fixed prompt: *"Run bd ready, choose a bead, begin work on only that bead. Exit when done."*
 - Check if more ready beads exist after agent exits
 - Stop when no ready beads remain (or run forever with `--watch` flag)
@@ -54,7 +54,7 @@ Enable autonomous AFK (away from keyboard) coding by continuously running AI age
 #### Components (simplified to 3)
 1. **CLI Interface**: clap-based command parsing
 2. **Loop Runner**: Simple while loop that spawns agent processes and checks for ready beads
-3. **Tmux Integration**: Creates/reuses tmux session named `ralph` for agent execution
+3. **Tmux Integration**: Creates/reuses tmux session named `otto` for agent execution
 
 #### What Ralph Does NOT Have (by design)
 - No monitoring/failure recovery
@@ -68,8 +68,8 @@ Enable autonomous AFK (away from keyboard) coding by continuously running AI age
 ## User Stories
 
 ### MVP
-- As a developer, I want to run `ralph` and have it work through my beads tasks automatically
-- As a developer, I want to run `ralph --watch` to keep agents running continuously
+- As a developer, I want to run `otto` and have it work through my beads tasks automatically
+- As a developer, I want to run `otto --watch` to keep agents running continuously
 
 ---
 

@@ -1,11 +1,11 @@
-//! Core functionality for Ralph
+//! Core functionality for Otto
 //!
 //! Provides the main agent launching logic for spawning Claude Code agents
 //! within tmux sessions.
 
 use std::process::Command;
 use std::time::Duration;
-use ralph_tmux::{ensure_ralph_session, send_ralph_command, TmuxError};
+use otto_tmux::{ensure_otto_session, send_otto_command, TmuxError};
 
 /// Error type for agent operations.
 #[derive(Debug)]
@@ -42,14 +42,14 @@ impl From<TmuxError> for AgentError {
 /// Result type for agent operations.
 pub type AgentResult<T> = Result<T, AgentError>;
 
-/// The fixed prompt used for all Claude Code agents launched by Ralph.
+/// The fixed prompt used for all Claude Code agents launched by Otto.
 ///
 /// This prompt directs the agent to:
 /// 1. Check for ready beads tasks
 /// 2. Choose one task
 /// 3. Work only on that task
 /// 4. Exit when done
-pub const RALPH_AGENT_PROMPT: &str =
+pub const OTTO_AGENT_PROMPT: &str =
     "Run bd ready, choose a bead, begin work on only that bead. Exit when done.";
 
 /// Default timeout for agent completion (5 minutes).
@@ -64,10 +64,10 @@ fn is_claude_available() -> bool {
         .unwrap_or(false)
 }
 
-/// Launches a Claude Code agent within the Ralph tmux session.
+/// Launches a Claude Code agent within the Otto tmux session.
 ///
 /// This function:
-/// 1. Ensures the ralph tmux session exists
+/// 1. Ensures the otto tmux session exists
 /// 2. Sends the claude command with the fixed prompt to the session
 /// 3. Waits for the agent to complete by checking if the process is still running
 ///
@@ -86,14 +86,14 @@ pub fn launch_agent(timeout_secs: Option<u64>) -> AgentResult<()> {
         return Err(AgentError::ClaudeNotAvailable);
     }
 
-    // Ensure the ralph tmux session exists
-    ensure_ralph_session()?;
+    // Ensure the otto tmux session exists
+    ensure_otto_session()?;
 
     // Construct the command to run claude with the fixed prompt
-    let claude_command = format!("claude \"{}\"", RALPH_AGENT_PROMPT);
+    let claude_command = format!("claude \"{}\"", OTTO_AGENT_PROMPT);
 
     // Send the command to the tmux session
-    send_ralph_command(&claude_command)?;
+    send_otto_command(&claude_command)?;
 
     // Wait for the agent to complete
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS));
@@ -138,8 +138,8 @@ mod tests {
 
     #[test]
     fn test_agent_prompt_constant() {
-        assert!(RALPH_AGENT_PROMPT.contains("bd ready"));
-        assert!(RALPH_AGENT_PROMPT.contains("Exit when done"));
+        assert!(OTTO_AGENT_PROMPT.contains("bd ready"));
+        assert!(OTTO_AGENT_PROMPT.contains("Exit when done"));
     }
 
     #[test]

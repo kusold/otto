@@ -1,4 +1,4 @@
-//! Tmux session management for Ralph
+//! Tmux session management for Otto
 //!
 //! Provides functionality to create, reuse, and interact with tmux sessions
 //! for running Claude Code agents.
@@ -34,8 +34,8 @@ impl std::error::Error for TmuxError {}
 /// Result type for tmux operations.
 pub type TmuxResult<T> = Result<T, TmuxError>;
 
-/// Default name for the Ralph tmux session.
-pub const RALPH_SESSION_NAME: &str = "ralph";
+/// Default name for the Otto tmux session.
+pub const OTTO_SESSION_NAME: &str = "otto";
 
 /// Checks if tmux is available on the system.
 fn is_tmux_available() -> bool {
@@ -149,20 +149,20 @@ pub fn send_command(session_name: &str, command: &str) -> TmuxResult<()> {
     }
 }
 
-/// Ensures the default Ralph session exists.
+/// Ensures the default Otto session exists.
 ///
-/// Convenience function that uses `RALPH_SESSION_NAME`.
+/// Convenience function that uses `OTTO_SESSION_NAME`.
 ///
 /// # Returns
 /// - `Ok(())` if the session exists or was created successfully
 /// - `Err` if there was an error
-pub fn ensure_ralph_session() -> TmuxResult<()> {
-    ensure_session(RALPH_SESSION_NAME)
+pub fn ensure_otto_session() -> TmuxResult<()> {
+    ensure_session(OTTO_SESSION_NAME)
 }
 
-/// Executes a command in the default Ralph session.
+/// Executes a command in the default Otto session.
 ///
-/// Convenience function that uses `RALPH_SESSION_NAME`.
+/// Convenience function that uses `OTTO_SESSION_NAME`.
 ///
 /// # Arguments
 /// * `command` - The command to execute
@@ -170,8 +170,8 @@ pub fn ensure_ralph_session() -> TmuxResult<()> {
 /// # Returns
 /// - `Ok(())` if the command was sent successfully
 /// - `Err` if there was an error
-pub fn send_ralph_command(command: &str) -> TmuxResult<()> {
-    send_command(RALPH_SESSION_NAME, command)
+pub fn send_otto_command(command: &str) -> TmuxResult<()> {
+    send_command(OTTO_SESSION_NAME, command)
 }
 
 #[cfg(test)]
@@ -180,7 +180,7 @@ mod tests {
 
     #[test]
     fn test_session_name_constant() {
-        assert_eq!(RALPH_SESSION_NAME, "ralph");
+        assert_eq!(OTTO_SESSION_NAME, "otto");
     }
 
     #[test]

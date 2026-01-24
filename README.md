@@ -1,6 +1,6 @@
-# Ralph
+# Otto
 
-Ralph is a simple CLI tool that autonomously runs AI coding agents in a loop. On each iteration, it launches an agent which picks a task from the [beads](https://github.com/heartsucker/bd) system, works on it, then exits. Ralph repeats this until no ready tasks remain.
+Otto is a simple CLI tool that autonomously runs AI coding agents in a loop. On each iteration, it launches an agent which picks a task from the [beads](https://github.com/heartsucker/bd) system, works on it, then exits. Otto repeats this until no ready tasks remain.
 
 ## Vision
 
@@ -10,13 +10,13 @@ Enable autonomous AFK (away from keyboard) coding by continuously running AI age
 
 - **Simple Loop**: Runs agents until no ready beads remain
 - **Watch Mode**: With `--watch`, runs continuously checking for new tasks
-- **Tmux Integration**: Spawns agents in a reusable `ralph` tmux session
+- **Tmux Integration**: Spawns agents in a reusable `otto` tmux session
 - **Graceful Shutdown**: Handles Ctrl+C cleanly, waiting for agents to finish
 - **Beads Integration**: Works with the beads issue tracking system
 
 ## Prerequisites
 
-Before using Ralph, ensure you have the following installed:
+Before using Otto, ensure you have the following installed:
 
 1. **tmux** - Terminal multiplexer for session management
    - NixOS: `tmux` is in nixpkgs
@@ -35,7 +35,7 @@ Before using Ralph, ensure you have the following installed:
 ### Using Cargo
 
 ```bash
-cargo install ralph
+cargo install otto
 ```
 
 ### Using Nix (NixOS/NixOS-friendly)
@@ -49,25 +49,25 @@ cargo install --path .
 
 ```bash
 git clone <repository-url>
-cd ralph
+cd otto
 cargo build --release
 ```
 
-The binary will be available at `target/release/ralph`.
+The binary will be available at `target/release/otto`.
 
 ## Usage
 
 ### Basic Usage
 
-Run Ralph in a project with beads initialized:
+Run Otto in a project with beads initialized:
 
 ```bash
-ralph
+otto
 ```
 
-Ralph will:
+Otto will:
 1. Check for ready beads (tasks with no blockers)
-2. Launch a Claude Code agent in a tmux session named `ralph`
+2. Launch a Claude Code agent in a tmux session named `otto`
 3. Wait for the agent to complete
 4. Repeat until no ready beads remain
 5. Exit
@@ -77,10 +77,10 @@ Ralph will:
 For continuous operation, use the `--watch` (or `-w`) flag:
 
 ```bash
-ralph --watch
+otto --watch
 ```
 
-In watch mode, Ralph will:
+In watch mode, Otto will:
 - Loop indefinitely
 - When no ready beads exist, wait 10 seconds and check again
 - Continue until you stop it with Ctrl+C
@@ -90,7 +90,7 @@ In watch mode, Ralph will:
 To watch the agent work, attach to the tmux session:
 
 ```bash
-tmux attach-session -t ralph
+tmux attach-session -t otto
 ```
 
 To detach without stopping Ralph:
@@ -98,7 +98,7 @@ To detach without stopping Ralph:
 
 ## How It Works
 
-Ralph runs a simple loop:
+Otto runs a simple loop:
 
 ```
 while true:
@@ -115,7 +115,7 @@ while true:
 
 ### The Agent Prompt
 
-All Claude Code agents launched by Ralph receive the same fixed prompt:
+All Claude Code agents launched by Otto receive the same fixed prompt:
 
 ```
 Run bd ready, choose a bead, begin work on only that bead. Exit when done.
@@ -133,7 +133,7 @@ This design ensures each agent focuses on a single task, maintaining clear bound
 
 ### "beads not initialized (no .beads directory)"
 
-Ralph requires beads to be initialized in your project directory.
+Otto requires beads to be initialized in your project directory.
 
 ```bash
 bd init
@@ -160,21 +160,21 @@ bd create --title="Your task here" --type=task --priority=2
 
 ### "Agent did not exit in expected time"
 
-The default agent timeout is 5 minutes. If your tasks regularly take longer, you may need to adjust the timeout in the source code (currently defined as `DEFAULT_AGENT_TIMEOUT_SECS` in `ralph-core`).
+The default agent timeout is 5 minutes. If your tasks regularly take longer, you may need to adjust the timeout in the source code (currently defined as `DEFAULT_AGENT_TIMEOUT_SECS` in `otto-core`).
 
 ### Claude Code Directory Trust Prompt
 
-When running Ralph in a new directory, Claude Code may prompt:
+When running Otto in a new directory, Claude Code may prompt:
 
 ```
 Do you trust the files in this folder?
 ```
 
-This is a security feature and requires manual intervention. **Workaround**: Run Ralph in a directory you've previously approved as trusted.
+This is a security feature and requires manual intervention. **Workaround**: Run Otto in a directory you've previously approved as trusted.
 
 ## Limitations
 
-Ralph is intentionally simple:
+Otto is intentionally simple:
 
 - **No state management**: Each agent run is independent
 - **No metrics or logging**: Simple console output only
@@ -187,12 +187,12 @@ Ralph is intentionally simple:
 ### Project Structure
 
 ```
-ralph/
+otto/
 ├── crates/
-│   ├── ralph/          # CLI interface and main loop
-│   ├── ralph-core/     # Agent launching logic
-│   ├── ralph-beads/    # Beads integration
-│   └── ralph-tmux/     # Tmux session management
+│   ├── otto/          # CLI interface and main loop
+│   ├── otto-core/     # Agent launching logic
+│   ├── otto-beads/    # Beads integration
+│   └── otto-tmux/     # Tmux session management
 ├── flake.nix           # Nix flake for development
 └── Cargo.toml          # Workspace configuration
 ```

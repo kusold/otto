@@ -1,24 +1,24 @@
 use clap::Parser;
-use ralph_beads::{has_ready_tasks, BeadsError};
-use ralph_core::{launch_agent_default, AgentError};
+use otto_beads::{has_ready_tasks, BeadsError};
+use otto_core::{launch_agent_default, AgentError};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Global shutdown flag, set by signal handlers
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 
-/// Ralph - Autonomous agent runner for beads tasks
+/// Otto - Autonomous agent runner for beads tasks
 ///
-/// Ralph continuously checks for ready-to-work beads tasks and spawns
+/// Otto continuously checks for ready-to-work beads tasks and spawns
 /// Claude Code agents to complete them.
 #[derive(Parser, Debug)]
-#[command(name = "ralph")]
+#[command(name = "otto")]
 #[command(version, about, long_about = None)]
 #[command(author = "Mike Kusold")]
 struct Args {
     /// Run in watch mode (loop forever, checking for ready tasks)
     ///
-    /// When enabled, ralph will continuously loop and spawn agents for ready tasks.
-    /// When disabled, ralph will stop when no ready tasks are found.
+    /// When enabled, otto will continuously loop and spawn agents for ready tasks.
+    /// When disabled, otto will stop when no ready tasks are found.
     #[arg(long, short = 'w')]
     watch: bool,
 }
@@ -57,11 +57,11 @@ fn main() {
     setup_signal_handlers();
 
     if args.watch {
-        println!("Ralph running in watch mode (infinite loop)");
+        println!("Otto running in watch mode (infinite loop)");
         println!("Press Ctrl+C to stop\n");
         run_watch_loop();
     } else {
-        println!("Ralph running in single-pass mode\n");
+        println!("Otto running in single-pass mode\n");
         run_single_pass();
     }
 }

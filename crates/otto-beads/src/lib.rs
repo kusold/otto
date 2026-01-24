@@ -1,4 +1,4 @@
-//! Beads integration for Ralph
+//! Beads integration for Otto
 //!
 //! Provides functionality to check for ready-to-work beads tasks.
 
@@ -44,7 +44,7 @@ pub type BeadsResult<T> = Result<T, BeadsError>;
 ///
 /// # Examples
 /// ```
-/// use ralph_beads::has_ready_tasks;
+/// use otto_beads::has_ready_tasks;
 ///
 /// match has_ready_tasks() {
 ///     Ok(true) => println!("There are ready tasks to work on"),

@@ -133,6 +133,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "otto"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "otto-beads",
+ "otto-core",
+ "signal-hook",
+]
+
+[[package]]
+name = "otto-beads"
+version = "0.1.0"
+
+[[package]]
+name = "otto-core"
+version = "0.1.0"
+dependencies = [
+ "otto-tmux",
+]
+
+[[package]]
+name = "otto-tmux"
+version = "0.1.0"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -149,31 +174,6 @@ checksum = "21b2ebcf727b7760c461f091f9f0f539b77b8e87f2fd88131e7f1b433b3cece4"
 dependencies = [
  "proc-macro2",
 ]
-
-[[package]]
-name = "ralph"
-version = "0.1.0"
-dependencies = [
- "clap",
- "ralph-beads",
- "ralph-core",
- "signal-hook",
-]
-
-[[package]]
-name = "ralph-beads"
-version = "0.1.0"
-
-[[package]]
-name = "ralph-core"
-version = "0.1.0"
-dependencies = [
- "ralph-tmux",
-]
-
-[[package]]
-name = "ralph-tmux"
-version = "0.1.0"
 
 [[package]]
 name = "signal-hook"

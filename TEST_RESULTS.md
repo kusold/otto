@@ -1,43 +1,43 @@
-# Ralph Integration Test Results
+# Otto Integration Test Results
 
 ## Test Environment
 - Date: 2026-01-24
-- Ralph version: 0.1.0
-- Test directories: `/tmp/ralph-test`, `/tmp/ralph-test-no-beads`, `/tmp/ralph-test-no-ready`
+- Otto version: 0.1.0
+- Test directories: `/tmp/otto-test`, `/tmp/otto-test-no-beads`, `/tmp/otto-test-no-ready`
 
 ## Test Summary
 
 ### ✅ Passed Tests
 
 1. **Edge Case: Beads not initialized**
-   - Test: Run ralph in a directory without `.beads`
+   - Test: Run otto in a directory without `.beads`
    - Expected: Error message "beads not initialized"
    - Result: ✅ PASS - Correct error message displayed
 
 2. **Edge Case: No ready beads**
-   - Test: Run ralph in initialized beads repo with no ready tasks
+   - Test: Run otto in initialized beads repo with no ready tasks
    - Expected: Message "No ready beads, exiting"
    - Result: ✅ PASS - Correct message and clean exit
 
 3. **Normal Mode: Exit when no ready beads**
-   - Test: Run `ralph` (single-pass mode)
+   - Test: Run `otto` (single-pass mode)
    - Expected: Exits after completing ready beads or when none available
    - Result: ✅ PASS - Exits cleanly when no ready beads
 
 4. **Watch Mode: Continuous loop**
-   - Test: Run `ralph --watch` with no ready tasks
+   - Test: Run `otto --watch` with no ready tasks
    - Expected: Shows "No ready beads, waiting..." and loops
    - Result: ✅ PASS - Correct behavior with 10-second wait interval
 
 5. **Tmux Session Management**
-   - Test: Run ralph multiple times
+   - Test: Run otto multiple times
    - Expected:
-     - Creates `ralph` tmux session on first run
+     - Creates `otto` tmux session on first run
      - Reuses existing session on subsequent runs
    - Result: ✅ PASS - Session created and persists for reuse
 
 6. **Signal Handling: Graceful Shutdown**
-   - Test: Send SIGINT (Ctrl+C) to ralph
+   - Test: Send SIGINT (Ctrl+C) to otto
    - Expected:
      - Message "Shutdown signal received, waiting for agent to finish..."
      - Graceful exit after agent completes
@@ -46,7 +46,7 @@
 ### ⚠️ Known Limitations
 
 1. **Claude Code Directory Trust Prompt**
-   - When running ralph in a new/untrusted directory, Claude Code prompts for trust
+   - When running otto in a new/untrusted directory, Claude Code prompts for trust
    - Prompt: "Do you trust the files in this folder?"
    - This requires manual intervention to proceed
    - **Workaround**: Pre-approve directories or run in trusted locations
@@ -54,7 +54,7 @@
 
 2. **Agent Timeout**
    - Default timeout is 5 minutes
-   - If agent takes longer, ralph will report timeout but continue
+   - If agent takes longer, otto will report timeout but continue
    - For simple tasks, this should be sufficient
 
 ## Success Criteria (from PRD)
@@ -77,10 +77,10 @@
 
 ## Conclusion
 
-Ralph's core functionality is working as designed:
+Otto's core functionality is working as designed:
 - Main loop logic is correct
 - Tmux integration works
 - Signal handling is robust
 - Edge cases are handled gracefully
 
-The only limitation is the Claude Code trust prompt, which is expected behavior for security reasons and not a bug in Ralph itself.
+The only limitation is the Claude Code trust prompt, which is expected behavior for security reasons and not a bug in Otto itself.

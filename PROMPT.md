@@ -1,6 +1,6 @@
 @AGENTS.md
 
-# Beads Ralph Loop
+# Beads Otto Loop
 
 - Run `bd prime` then `bd ready` and pick ONE issue
 - `bd update <id> --status=in_progress` then implement that issue only
