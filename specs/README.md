@@ -16,13 +16,16 @@ Otto is a command-line tool that autonomously executes AI coding agents in a con
                 │                    │
         ┌───────▼─────────┐  ┌──────▼──────────┐
         │   otto-beads    │  │   otto-core     │
-        │  Task checking  │  │ Agent launching │
+        │  Task checking  │  │ Agent orchestration│
         └─────────────────┘  └──────┬──────────┘
                                      │
-                            ┌────────▼──────────┐
-                            │   otto-tmux       │
-                            │ Session management│
-                            └───────────────────┘
+                    ┌────────────────┼────────────────┐
+                    │                │                │
+            ┌───────▼────────┐ ┌────▼─────┐ ┌───────▼──────────┐
+            │   otto-claude  │ │otto-tmux │ │ (future: other  │
+            │  Claude CLI    │ │session   │ │  agent providers)│
+            │  interactions  │ │management│ └──────────────────┘
+            └────────────────┘ └──────────┘
 ```
 
 ## Crate Specifications
@@ -30,7 +33,8 @@ Otto is a command-line tool that autonomously executes AI coding agents in a con
 | Crate | Description | Specification |
 |-------|-------------|---------------|
 | **otto** | Main CLI binary - orchestrates the autonomous agent loop with signal handling and watch mode | [otto-cli.md](./otto-cli.md) |
-| **otto-core** | Core agent launching functionality - spawns and monitors Claude Code agents in tmux sessions | [otto-core.md](./otto-core.md) |
+| **otto-core** | Core agent orchestration - coordinates agent launching, monitoring, and lifecycle management | [otto-core.md](./otto-core.md) |
+| **otto-claude** | Claude Code CLI integration - availability detection, process monitoring, command construction | [otto-claude.md](./otto-claude.md) |
 | **otto-beads** | Beads issue tracking integration - checks for ready-to-work tasks with no blockers | [otto-beads.md](./otto-beads.md) |
 | **otto-tmux** | Tmux session management - provides interface for creating and managing tmux sessions | [otto-tmux.md](./otto-tmux.md) |
 
@@ -40,10 +44,11 @@ Otto is a command-line tool that autonomously executes AI coding agents in a con
 |-------|-------------|----------------|
 | **CLI Design** | Command-line interface, argument parsing, user output messages | [otto-cli.md](./otto-cli.md) |
 | **Agent Lifecycle** | Spawning, monitoring, timeout handling for Claude Code agents | [otto-core.md](./otto-core.md) |
+| **Claude Integration** | Claude Code CLI availability, process monitoring, command construction | [otto-claude.md](./otto-claude.md) |
 | **Session Management** | Tmux session creation, reuse, command execution | [otto-tmux.md](./otto-tmux.md) |
 | **Task Queue Integration** | Beads issue tracking, ready task detection, dependency resolution | [otto-beads.md](./otto-beads.md) |
 | **Signal Handling** | SIGINT/SIGTERM handling, graceful shutdown, atomic coordination | [otto-cli.md](./otto-cli.md) |
-| **Process Monitoring** | Polling-based agent monitoring with pgrep, timeout detection | [otto-core.md](./otto-core.md) |
+| **Process Monitoring** | Polling-based agent monitoring with pgrep, timeout detection | [otto-claude.md](./otto-claude.md) |
 | **Error Handling** | Error types, propagation, user-friendly messages across all crates | [All specs](./otto-cli.md) |
 | **Concurrency Model** | Signal handling thread, main control loop, synchronous operations | [otto-cli.md](./otto-cli.md) |
 
@@ -83,7 +88,10 @@ Otto is a command-line tool that autonomously executes AI coding agents in a con
    - Tmux session management, command execution, availability detection
 
 3. [otto-core.md](./otto-core.md) - 455 lines
-   - Agent launching, process monitoring, fixed prompt architecture
+   - Agent orchestration, lifecycle management, coordination
 
-4. [otto-beads.md](./otto-beads.md) - 267 lines
+4. [otto-claude.md](./otto-claude.md) - TBD lines
+   - Claude Code CLI integration, process monitoring, command construction
+
+5. [otto-beads.md](./otto-beads.md) - 267 lines
    - Beads integration, ready task detection, error handling

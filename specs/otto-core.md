@@ -2,37 +2,40 @@
 
 ## Overview
 
-The `otto-core` crate provides the core agent launching functionality for the Otto project. It is responsible for spawning and managing Claude Code AI agents within tmux sessions, enabling autonomous task execution through a simple, well-defined interface.
+The `otto-core` crate provides agent orchestration functionality for the Otto project. It coordinates the launching and monitoring of AI agents by integrating tmux session management (via `otto-tmux`) and Claude Code CLI interactions (via `otto-claude`), enabling autonomous task execution through a simple, well-defined interface.
 
 **Location**: `/home/mike/Development/otto/crates/otto-core`
 
-**Purpose**: Abstract away the complexity of launching AI agents, providing a clean API for the main Otto CLI to spawn agents that work on beads tasks.
+**Purpose**: Orchestrate the agent lifecycle by coordinating tmux sessions and Claude Code CLI, providing a clean API for the main Otto CLI to spawn agents that work on beads tasks.
+
+**Note**: This crate focuses on orchestration and coordination. Claude-specific operations are delegated to the `otto-claude` crate, and tmux operations are delegated to the `otto-tmux` crate.
 
 **Version**: 0.1.0
 
 ## Core Features
 
-### 1. Agent Launching
-- Spawns Claude Code agents within a tmux session
-- Ensures the tmux session exists before launching
-- Sends a fixed, well-defined prompt to each agent
-- Waits for agent completion with configurable timeout
+### 1. Agent Orchestration
+- Coordinates tmux session creation and Claude Code agent launching
+- Ensures the tmux session exists before launching (via otto-tmux)
+- Sends agent commands to the tmux session
+- Waits for agent completion with configurable timeout (via otto-claude)
 
-### 2. Process Monitoring
-- Poll-based monitoring of agent process lifecycle
-- Uses `pgrep` to detect when Claude Code process exits
-- Configurable timeout mechanism (default: 5 minutes)
-- Polling interval: 2 seconds
+### 2. Lifecycle Coordination
+- Checks Claude Code availability before launching (via otto-claude)
+- Spawns agents by sending commands to tmux sessions (via otto-tmux)
+- Monitors agent process lifecycle (via otto-claude)
+- Handles timeout and error scenarios
 
 ### 3. Error Handling
 - Comprehensive error type covering all failure modes
+- Wraps and propagates errors from otto-tmux and otto-claude
 - Clear error messages for users
-- Proper error propagation from tmux operations
+- Proper error context for debugging
 
-### 4. Fixed Prompt Architecture
-- All agents receive the same fixed prompt
-- Ensures consistent behavior across agent launches
-- Prompts agents to work on a single beads task and exit
+### 4. Simple API
+- Single-function launch interface with optional timeout
+- Convenience function for default timeout
+- Minimal surface area for easy integration
 
 ## Module Structure
 
@@ -50,26 +53,22 @@ The primary error type for all agent operations.
 
 ```rust
 pub enum AgentError {
-    /// Claude Code CLI is not available
-    ClaudeNotAvailable,
-    /// Tmux operation failed
+    /// Claude Code CLI error (wrapped from otto-claude)
+    ClaudeError(ClaudeError),
+    /// Tmux operation failed (wrapped from otto-tmux)
     TmuxError(TmuxError),
-    /// Agent failed to start
-    AgentStartFailed(String),
-    /// Agent did not exit in time
-    AgentTimeout,
+    /// Agent orchestration failed
+    OrchestrationFailed(String),
 }
 ```
 
 **Variants:**
 
-- **`ClaudeNotAvailable`**: Returned when the `claude` command is not found on the system. Indicates Claude Code CLI is not installed or not in PATH.
+- **`ClaudeError(ClaudeError)`**: Wraps errors from the `otto-claude` crate. Includes Claude not available, version check failures, agent timeouts, etc.
 
 - **`TmuxError(TmuxError)`**: Wraps errors from the `otto-tmux` crate. Propagates tmux session management failures.
 
-- **`AgentStartFailed(String)`**: Indicates the agent process failed to start. The String contains details about the failure.
-
-- **`AgentTimeout`**: Returned when the agent does not complete within the specified timeout period. Default is 300 seconds (5 minutes).
+- **`OrchestrationFailed(String)`**: Indicates orchestration logic failed (e.g., command construction errors, unexpected state).
 
 #### `AgentResult<T>`
 
@@ -81,13 +80,12 @@ pub type AgentResult<T> = Result<T, AgentError>;
 
 ## Constants
 
-### `OTTO_AGENT_PROMPT`
+### Agent Prompt
 
-The fixed prompt sent to all Claude Code agents:
+**Note**: The `OTTO_AGENT_PROMPT` constant is now defined in the `otto-claude` crate. This crate re-exports it for convenience:
 
 ```rust
-pub const OTTO_AGENT_PROMPT: &str =
-    "Run bd ready, choose a bead, begin work on only that bead. Exit when done.";
+pub use otto_claude::OTTO_AGENT_PROMPT;
 ```
 
 **Purpose**: Directs the agent to:
@@ -129,21 +127,20 @@ Launches a Claude Code agent within the Otto tmux session with a specified timeo
 
 **Return Value:**
 - `Ok(())`: Agent completed successfully
-- `Err(AgentError::ClaudeNotAvailable)`: Claude Code CLI not installed
+- `Err(AgentError::ClaudeError(ClaudeError::ClaudeNotAvailable))`: Claude Code CLI not installed
 - `Err(AgentError::TmuxError)`: Tmux operation failed
-- `Err(AgentError::AgentStartFailed)`: Agent failed to start
-- `Err(AgentError::AgentTimeout)`: Agent didn't exit in time
+- `Err(AgentError::ClaudeError(ClaudeError::AgentTimeout))`: Agent didn't exit in time
 
 **Algorithm:**
 
-1. **Check Claude Availability**: Run `claude --version` to verify Claude Code CLI is installed
+1. **Check Claude Availability**: Call `otto_claude::is_claude_available()` to verify Claude Code CLI is installed
 2. **Ensure Tmux Session**: Call `otto_tmux::ensure_otto_session()` to create/reuse the "otto" session
-3. **Construct Command**: Format the Claude command with the fixed prompt
+3. **Construct Command**: Use `otto_claude::build_agent_prompt(OTTO_AGENT_PROMPT)` to format the command
 4. **Send Command**: Use `otto_tmux::send_otto_command()` to execute the command in tmux
-5. **Monitor Process**: Poll every 2 seconds using `pgrep -f claude` to check if process is running
-6. **Wait for Completion**: Continue polling until:
-   - Process exits (return Ok)
-   - Timeout elapses (return AgentTimeout)
+5. **Wait for Completion**: Call `otto_claude::wait_for_claude_exit(timeout_secs)` which:
+   - Polls every 2 seconds using internal pgrep checks
+   - Returns Ok when process exits
+   - Returns ClaudeError::AgentTimeout on timeout
 
 **Example Usage:**
 
@@ -179,7 +176,15 @@ match launch_agent_default() {
 
 ### Dependencies
 
-The crate has one external dependency:
+The crate has two internal dependencies:
+
+**otto-claude** (path: `../otto-claude`)
+- Provides Claude Code CLI interaction functionality
+- Used functions:
+  - `is_claude_available()`: Checks if Claude Code CLI is installed
+  - `wait_for_claude_exit(timeout_secs)`: Waits for agent completion
+  - `build_agent_prompt(prompt)`: Constructs claude commands
+  - `OTTO_AGENT_PROMPT`: The fixed agent prompt constant
 
 **otto-tmux** (path: `../otto-tmux`)
 - Provides tmux session management functionality
@@ -189,22 +194,9 @@ The crate has one external dependency:
 
 ### External Commands
 
-The crate interacts with several system commands:
-
-#### 1. `claude --version`
-- **Purpose**: Check if Claude Code CLI is available
-- **Usage**: `Command::new("claude").arg("--version").output()`
-- **Success Criteria**: Exit code 0
-- **Error Handling**: Returns false if command fails or returns non-zero exit code
-
-#### 2. `pgrep -f claude`
-- **Purpose**: Check if Claude Code process is still running
-- **Usage**: `Command::new("pgrep").arg("-f").arg("claude").output()`
-- **Polling Interval**: Every 2 seconds
-- **Success Criteria**: Exit code 0 means process is running
-- **Interpretation**: Exit code 1 (no match) means agent has exited
-
-#### 3. Tmux commands (via otto-tmux)
+The crate does not directly interact with system commands. All external command interaction is delegated to:
+- **otto-claude** for Claude Code CLI operations (`claude --version`, `pgrep -f claude`)
+- **otto-tmux** for tmux operations (`tmux has-session`, `tmux new-session`, `tmux send-keys`)
 - **Session Management**: Create/check for "otto" session
 - **Command Execution**: Send claude command to the session
 - **Implementation**: Delegated to otto-tmux crate
@@ -333,20 +325,24 @@ These tests ensure the core constants remain correct as the code evolves.
          │                        │
 ┌────────▼────────┐    ┌─────────▼──────────┐
 │  otto-beads     │    │   otto-core         │  ← THIS CRATE
-│  Task checking  │    │   Agent launching   │
+│  Task checking  │    │   Agent orchestration│
 └─────────────────┘    └─────────┬──────────┘
                                 │
-                       ┌────────▼──────────┐
-                       │   otto-tmux       │
-                       │   Session mgmt    │
-                       └───────────────────┘
+                       ┌────────┼────────┐
+                       │        │        │
+                ┌──────▼───┐ ┌─▼──────┐ ┌▼───────────┐
+                │otto-claude│ │otto-tmux│ │ (future:   │
+                │Claude CLI │ │Session  │ │  other     │
+                │interactions│ │mgmt    │ │  agents)   │
+                └───────────┘ └────────┘ └────────────┘
 ```
 
 ### Dependencies Flow
 
-1. **otto** depends on **otto-core** for agent launching
-2. **otto-core** depends on **otto-tmux** for tmux operations
-3. **otto** also depends on **otto-beads** for task checking
+1. **otto** depends on **otto-core** for agent orchestration
+2. **otto-core** depends on **otto-claude** for Claude Code CLI interactions
+3. **otto-core** depends on **otto-tmux** for tmux session operations
+4. **otto** also depends on **otto-beads** for task checking
 
 ### Usage in Main CLI
 
