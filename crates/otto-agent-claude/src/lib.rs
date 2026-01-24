@@ -101,6 +101,41 @@ pub fn is_claude_running() -> bool {
         .unwrap_or(false)
 }
 
+/// Checks if a specific process ID is a Claude process.
+///
+/// This function validates whether a given PID corresponds to a running
+/// Claude Code CLI process by checking the process command line.
+///
+/// # Arguments
+/// * `pid` - The process ID to check
+///
+/// # Returns
+/// - `true` if the PID exists and is a claude process
+/// - `false` otherwise
+///
+/// # Example
+/// ```rust
+/// use otto_agent_claude::is_claude_process;
+///
+/// if is_claude_process(12345) {
+///     println!("PID 12345 is a Claude process");
+/// }
+/// ```
+pub fn is_claude_process(pid: u32) -> bool {
+    // Read /proc/<pid>/cmdline to get the command line
+    let cmdline_path = format!("/proc/{}/cmdline", pid);
+
+    match std::fs::read_to_string(&cmdline_path) {
+        Ok(cmdline) => {
+            // cmdline contains null-separated arguments; convert to spaces
+            let command = cmdline.replace('\0', " ");
+            // Check if "claude" appears in the command
+            command.contains("claude")
+        }
+        Err(_) => false,
+    }
+}
+
 /// Waits for Claude to exit within the specified timeout.
 ///
 /// Polls every 2 seconds to check if claude is still running.

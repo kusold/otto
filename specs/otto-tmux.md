@@ -447,6 +447,263 @@ impl From<TmuxError> for AgentError {
 
 This allows `?` operator to automatically convert `TmuxError` to `AgentError`.
 
+## Pane Process Tracking
+
+As of v0.1.0, the crate includes functionality to track and monitor processes running in tmux panes. This is essential for determining whether a Claude Code agent is actively working in a specific pane.
+
+### Pane Specification Format
+
+Panes are identified using tmux's standard specification format: `session_name:window.pane`
+
+Examples:
+- `otto:0.0` - The otto session, window 0, pane 0
+- `my-session:1.2` - Window 1, pane 2 in my-session
+- `agent:0.0` - First pane of first window in agent session
+
+### Core Functions
+
+#### get_pane_pid()
+
+```rust
+pub fn get_pane_pid(pane_spec: &str) -> TmuxResult<Option<u32>>
+```
+
+Gets the process ID (PID) of the foreground process running in a tmux pane.
+
+**How it works:**
+1. Validates the pane spec format (must contain `:` and `.`)
+2. Queries tmux using `display-message -p "#{pane_pid}"`
+3. Parses and returns the PID as a u32
+
+**Returns:**
+- `Ok(Some(pid))` - Process is running in the pane
+- `Ok(None)` - Pane exists but no process (or pane doesn't exist)
+- `Err(TmuxError::InvalidPaneSpec)` - Malformed pane specification
+- `Err(TmuxError::PaneProcessQueryFailed)` - Query failed
+
+**Example:**
+```rust
+match get_pane_pid("otto:0.0")? {
+    Some(pid) => println!("Process {} running in pane", pid),
+    None => println!("Pane is empty or doesn't exist"),
+}
+```
+
+#### get_pane_command()
+
+```rust
+pub fn get_pane_command(pane_spec: &str) -> TmuxResult<Option<String>>
+```
+
+Retrieves the full command line of the process running in a pane.
+
+**How it works:**
+1. Gets the PID using `get_pane_pid()`
+2. Reads `/proc/<pid>/cmdline` for the command line
+3. Converts null-separated arguments to space-separated string
+
+**Platform Support:**
+- Linux/Unix with /proc filesystem: Full support
+- Other platforms: Returns error
+
+**Example:**
+```rust
+if let Some(cmd) = get_pane_command("otto:0.0")? {
+    println!("Running: {}", cmd);
+    // Output: "/usr/bin/claude --dangerously-skip-permissions --print \"Run tests\""
+}
+```
+
+#### is_process_in_pane()
+
+```rust
+pub fn is_process_in_pane(pane_spec: &str, process_name: &str) -> TmuxResult<bool>
+```
+
+Convenience function to check if a specific process name is running in a pane.
+
+**How it works:**
+1. Gets the pane command using `get_pane_command()`
+2. Checks if the command contains the process name
+3. Returns boolean result
+
+**Example:**
+```rust
+if is_process_in_pane("otto:0.0", "claude")? {
+    println!("Claude is running in the pane");
+}
+```
+
+### Error Handling
+
+Pane tracking introduces two new error variants:
+
+```rust
+pub enum TmuxError {
+    // ... existing variants ...
+    PaneProcessQueryFailed(String),
+    InvalidPaneSpec(String),
+}
+```
+
+- **PaneProcessQueryFailed**: tmux command failed or output was invalid
+- **InvalidPaneSpec**: Pane spec doesn't match expected format (missing `:` or `.`)
+
+### Integration with otto-agent-claude
+
+The `otto-agent-claude` crate provides `is_claude_process(pid: u32) -> bool` which validates whether a given PID is actually a Claude process by reading `/proc/<pid>/cmdline`.
+
+This two-step verification ensures accurate tracking:
+1. `otto-tmux` gets the PID from the pane
+2. `otto-agent-claude` validates it's a Claude process
+
+**Combined usage in otto-core:**
+```rust
+pub fn is_claude_active_in_pane(pane_spec: Option<&str>) -> AgentResult<bool> {
+    let pane = pane_spec.unwrap_or("otto:0.0");
+
+    match get_pane_pid(pane)? {
+        Some(pid) => Ok(is_claude_process(pid)),
+        None => Ok(false),
+    }
+}
+```
+
+### Use Cases
+
+#### 1. Agent State Detection
+
+Determine if Claude is still working or has completed:
+
+```rust
+if !is_claude_active_in_pane(Some("otto:0.0"))? {
+    println!("Claude has finished or exited");
+    // Proceed with next step
+}
+```
+
+#### 2. Multiple Claude Instances
+
+Track different Claude agents across different panes:
+
+```rust
+let agent1 = "otto:0.0";
+let agent2 = "otto:0.1"; // Split pane
+
+if is_process_in_pane(agent1, "claude")? && is_process_in_pane(agent2, "claude")? {
+    println!("Both agents are running");
+}
+```
+
+#### 3. Manual Exit Detection
+
+Detect when a user manually exits Claude:
+
+```rust
+while is_claude_active_in_pane(Some("otto:0.0"))? {
+    std::thread::sleep(Duration::from_secs(5));
+}
+println!("Claude session ended");
+```
+
+#### 4. Pane-Specific Waiting
+
+Wait for Claude to exit in a specific pane (not globally):
+
+```rust
+pub fn wait_for_claude_in_pane(pane_spec: &str, timeout_secs: u64) -> AgentResult<()> {
+    let timeout = Duration::from_secs(timeout_secs);
+    let start = Instant::now();
+
+    while start.elapsed() < timeout {
+        if !is_claude_active_in_pane(Some(pane_spec))? {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_secs(2));
+    }
+
+    Err(AgentError::AgentTimeout)
+}
+```
+
+### Testing
+
+Pane tracking functions include unit tests:
+
+```rust
+#[test]
+fn test_invalid_pane_spec_rejected() {
+    let result = get_pane_pid("invalid-spec");
+    assert!(matches!(result, Err(TmuxError::InvalidPaneSpec(_))));
+}
+```
+
+**Testing considerations:**
+- Tests validate pane spec format without requiring running tmux
+- Integration tests would require actual tmux sessions
+- Doc tests demonstrate usage patterns
+- Platform-specific code (Linux /proc) is gracefully handled
+
+### Implementation Notes
+
+#### Tmux Format Strings
+
+The `get_pane_pid()` function uses tmux's format string feature:
+
+```bash
+tmux display-message -t otto:0.0 -p "#{pane_pid}"
+```
+
+- `#{pane_pid}` - Built-in format variable for pane PID
+- `display-message` - Command to query pane properties
+- `-t` - Target specification
+- `-p` - Print mode (output only the format string)
+
+#### /proc/cmdline Parsing
+
+The `get_pane_command()` function reads process command line from `/proc`:
+
+```rust
+let cmdline = std::fs::read_to_string(format!("/proc/{}/cmdline", pid))?;
+let command = cmdline.replace('\0', " "); // Convert null separators to spaces
+```
+
+**Why /proc/cmdline:**
+- Contains complete command line with all arguments
+- Null-separated (argv format)
+- Available on all Linux systems
+- More reliable than parsing `ps` output
+
+#### Graceful Degradation
+
+The implementation handles edge cases:
+
+1. **Pane doesn't exist**: Returns `Ok(None)` instead of error
+2. **Process exited**: Returns `Ok(None)` when reading /proc fails
+3. **Invalid PID**: Returns error if PID parsing fails
+4. **Missing /proc**: Returns error (platform limitation)
+
+### Security Considerations
+
+#### PID Validation
+
+The crate validates PIDs by parsing them as `u32`, preventing invalid values:
+
+```rust
+pid_str.parse::<u32>()
+    .map(Some)
+    .map_err(|_| TmuxError::PaneProcessQueryFailed(format!("invalid PID: {}", pid_str)))
+}
+```
+
+#### Process Exposure
+
+Reading `/proc/<pid>/cmdline` reveals command line arguments:
+- Only processes in tmux panes are queried
+- No privilege escalation (runs as same user)
+- Information already visible via `ps` command
+- Appropriate for trusted development environment
+
 ## Design Decisions
 
 ### Why Detached Sessions?
@@ -496,7 +753,7 @@ The crate uses synchronous process spawning, not async:
 1. **Session listing**: Function to list all otto sessions
 2. **Session cleanup**: Function to kill/terminate sessions
 3. **Window management**: Support for multiple windows per session
-4. **Pane management**: Support for split panes
+4. **Pane management**: Support for split panes ~~(PARTIALLY IMPLEMENTED: get_pane_pid, get_pane_command, is_process_in_pane)~~
 5. **Output capture**: Capture command output from sessions
 6. **Session status**: Check if session is active/idle
 

@@ -5,7 +5,7 @@
 
 use otto_tmux::{ensure_otto_session, send_otto_command, TmuxError};
 use otto_agent_claude::{
-    build_agent_prompt, get_prompt, is_claude_available, wait_for_claude_exit,
+    build_agent_prompt, get_prompt, is_claude_available, is_claude_process, wait_for_claude_exit,
     ClaudeError,
 };
 
@@ -118,6 +118,89 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
 /// - `Err` if there was an error
 pub fn launch_agent_default(prompt_file: Option<&str>) -> AgentResult<()> {
     launch_agent(None, prompt_file)
+}
+
+/// Checks if Claude is currently active in a specific tmux pane.
+///
+/// This function combines tmux pane process tracking with Claude process
+/// validation to reliably determine if a Claude Code agent is running
+/// in the specified pane.
+///
+/// It works by:
+/// 1. Querying tmux for the PID of the process in the pane
+/// 2. Validating that the PID corresponds to a Claude process
+///
+/// This two-step approach ensures we don't get false positives from
+/// other processes that might be running in the pane.
+///
+/// # Arguments
+/// * `pane_spec` - The pane specification (e.g., "otto:0.0" for session otto, window 0, pane 0)
+///                 If `None`, uses the default "otto:0.0" pane
+///
+/// # Returns
+/// - `Ok(true)` if Claude is running in the pane
+/// - `Ok(false)` if Claude is not running in the pane
+/// - `Err(AgentError::TmuxError)` if tmux operations fail
+///
+/// # Example
+/// ```rust
+/// use otto_core::is_claude_active_in_pane;
+///
+/// match is_claude_active_in_pane(Some("otto:0.0")) {
+///     Ok(true) => println!("Claude is working"),
+///     Ok(false) => println!("Pane is idle or running something else"),
+///     Err(e) => eprintln!("Error checking pane: {}", e),
+/// }
+/// ```
+///
+/// # Notes
+/// - This function uses /proc filesystem to read process information
+/// - Only works on Linux/Unix systems with /proc support
+/// - Returns false if the pane doesn't exist (rather than an error)
+/// - Handles multiple Claude instances correctly by checking specific panes
+pub fn is_claude_active_in_pane(pane_spec: Option<&str>) -> AgentResult<bool> {
+    use otto_tmux::get_pane_pid;
+
+    let pane = pane_spec.unwrap_or("otto:0.0");
+
+    // Get the PID of the process in the pane
+    match get_pane_pid(pane)? {
+        Some(pid) => {
+            // Check if this PID is a Claude process
+            Ok(is_claude_process(pid))
+        }
+        None => {
+            // No process running in the pane
+            Ok(false)
+        }
+    }
+}
+
+/// Waits for Claude to exit in a specific tmux pane.
+///
+/// Unlike `wait_for_claude_exit` which checks for any Claude process,
+/// this function specifically monitors a tmux pane for Claude activity
+/// and waits until Claude is no longer running there.
+///
+/// # Arguments
+/// * `pane_spec` - The pane specification (e.g., "otto:0.0")
+/// * `timeout_secs` - Maximum time to wait in seconds
+///
+/// # Returns
+/// - `Ok(())` if Claude has exited from the pane
+/// - `Err(AgentError::AgentTimeout)` if timeout is reached
+pub fn wait_for_claude_in_pane(pane_spec: &str, timeout_secs: u64) -> AgentResult<()> {
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        if !is_claude_active_in_pane(Some(pane_spec))? {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+
+    Err(AgentError::AgentTimeout)
 }
 
 #[cfg(test)]
