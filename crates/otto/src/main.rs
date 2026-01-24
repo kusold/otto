@@ -21,6 +21,13 @@ struct Args {
     /// When disabled, otto will stop when no ready tasks are found.
     #[arg(long, short = 'w')]
     watch: bool,
+
+    /// Path to a custom prompt file for Claude Code agents
+    ///
+    /// If provided, reads the prompt from this file. Otherwise, uses the default
+    /// OTTO_AGENT_PROMPT.
+    #[arg(long, short = 'p')]
+    prompt_file: Option<String>,
 }
 
 /// Sets up signal handlers for SIGINT (Ctrl+C) and SIGTERM.
@@ -56,17 +63,20 @@ fn main() {
     // Set up signal handlers for graceful shutdown
     setup_signal_handlers();
 
+    // Convert the prompt_file Option<String> to Option<&str>
+    let prompt_file = args.prompt_file.as_deref();
+
     if args.watch {
         println!("Otto running in watch mode (infinite loop)");
         println!("Press Ctrl+C to stop\n");
-        run_watch_loop();
+        run_watch_loop(prompt_file);
     } else {
         println!("Otto running in single-pass mode\n");
-        run_single_pass();
+        run_single_pass(prompt_file);
     }
 }
 
-fn run_single_pass() {
+fn run_single_pass(prompt_file: Option<&str>) {
     loop {
         // Check if shutdown was requested
         if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
@@ -79,7 +89,7 @@ fn run_single_pass() {
             Ok(true) => {
                 // Ready beads exist, launch an agent
                 println!("Starting agent...");
-                match launch_agent_default() {
+                match launch_agent_default(prompt_file) {
                     Ok(()) => {
                         println!("Agent finished");
                     }
@@ -115,7 +125,7 @@ fn run_single_pass() {
     }
 }
 
-fn run_watch_loop() {
+fn run_watch_loop(prompt_file: Option<&str>) {
     loop {
         // Check if shutdown was requested
         if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
@@ -128,7 +138,7 @@ fn run_watch_loop() {
             Ok(true) => {
                 // Ready beads exist, launch an agent
                 println!("Starting agent...");
-                match launch_agent_default() {
+                match launch_agent_default(prompt_file) {
                     Ok(()) => {
                         println!("Agent finished");
                     }
