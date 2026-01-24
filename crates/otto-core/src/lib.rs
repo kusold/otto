@@ -59,8 +59,8 @@ impl From<ClaudeError> for AgentError {
 /// Result type for agent operations.
 pub type AgentResult<T> = Result<T, AgentError>;
 
-/// Default timeout for agent completion (5 minutes).
-const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 300;
+/// Default timeout for agent completion (30 minutes).
+const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 
 /// Launches a Claude Code agent within the Otto tmux session.
 ///
@@ -108,7 +108,7 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
 
 /// Launches a Claude Code agent with the default timeout and optional prompt file.
 ///
-/// Convenience function that uses the default 5-minute timeout.
+/// Convenience function that uses the default 30-minute timeout.
 ///
 /// # Arguments
 /// * `prompt_file` - Optional path to a file containing the custom prompt
@@ -126,6 +126,6 @@ mod tests {
 
     #[test]
     fn test_default_timeout() {
-        assert_eq!(DEFAULT_AGENT_TIMEOUT_SECS, 300);
+        assert_eq!(DEFAULT_AGENT_TIMEOUT_SECS, 1800);
     }
 }
