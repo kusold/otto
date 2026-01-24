@@ -1,0 +1,12 @@
+[workspace]
+resolver = "2"
+members = ["crates/ralph", "crates/ralph-core", "crates/ralph-beads", "crates/ralph-tmux"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Mike Kusold"]
+license = "MIT"
+
+[workspace.dependencies]
+clap = { version = "4.5", features = ["derive"] }

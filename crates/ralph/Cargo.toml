@@ -1,0 +1,8 @@
+[package]
+name = "ralph"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+clap.workspace = true
+ralph-core = { path = "../ralph-core" }
