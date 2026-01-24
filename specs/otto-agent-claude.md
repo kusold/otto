@@ -1,10 +1,10 @@
-# otto-claude Crate Specification
+# otto-agent-claude Crate Specification
 
 ## Overview
 
-The `otto-claude` crate provides a focused interface for interacting with the Claude Code CLI. It extracts all Claude-specific logic from the orchestration layer, providing a clean abstraction for availability detection, process monitoring, and command construction.
+The `otto-agent-claude` crate provides a focused interface for interacting with the Claude Code CLI. It extracts all Claude-specific logic from the orchestration layer, providing a clean abstraction for availability detection, process monitoring, and command construction.
 
-**Location**: `/home/mike/Development/otto/crates/otto-claude`
+**Location**: `/home/mike/Development/otto/crates/otto-agent-claude`
 
 **Purpose**: Abstract Claude Code CLI interactions into a dedicated crate, enabling:
 - Easy testing (mockable Claude interactions)
@@ -54,26 +54,26 @@ pub enum ClaudeError {
     ClaudeNotAvailable,
 
     /// Failed to get Claude version
-    VersionCheckFailed(String),
+    VersionError(String),
 
-    /// Process monitoring failed
-    ProcessCheckFailed(String),
+    /// Claude process failed to start
+    ClaudeStartFailed(String),
 
     /// Agent did not exit within timeout
-    AgentTimeout,
+    ClaudeTimeout,
 
-    /// Command execution failed
-    ExecutionFailed(String),
+    /// Claude execution failed at runtime
+    ClaudeExecutionFailed(String),
 }
 ```
 
 **Variants:**
 
 - **`ClaudeNotAvailable`**: Claude Code CLI not installed or not in PATH
-- **`VersionCheckFailed(String)`**: `claude --version` command failed
-- **`ProcessCheckFailed(String)`**: `pgrep` command failed
-- **`AgentTimeout`**: Agent did not exit within specified timeout
-- **`ExecutionFailed(String)`**: General execution failure with details
+- **`VersionError(String)`**: `claude --version` command failed
+- **`ClaudeStartFailed(String)`**: Failed to start Claude process
+- **`ClaudeTimeout`**: Agent did not exit within specified timeout
+- **`ClaudeExecutionFailed(String)`**: Runtime execution failure
 
 #### `ClaudeResult<T>`
 
@@ -98,10 +98,11 @@ Check if Claude Code CLI is installed and accessible.
 **Implementation:**
 ```rust
 pub fn is_claude_available() -> bool {
-    match Command::new("claude").arg("--version").output() {
-        Ok(output) => output.status.success(),
-        Err(_) => false,
-    }
+    Command::new("claude")
+        .arg("--version")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 ```
 
@@ -111,8 +112,7 @@ Get Claude Code CLI version string.
 
 **Returns:**
 - `Ok(version)` - Version string (e.g., "1.2.3")
-- `Err(ClaudeError::ClaudeNotAvailable)` - Claude not installed
-- `Err(ClaudeError::VersionCheckFailed)` - Version check failed
+- `Err(ClaudeError::VersionError)` - Version check failed
 
 **Example:**
 ```rust
@@ -136,13 +136,12 @@ Check if any Claude Code process is currently running.
 **Implementation:**
 ```rust
 pub fn is_claude_running() -> bool {
-    match Command::new("pgrep")
-        .args(["-f", "claude"])
+    Command::new("pgrep")
+        .arg("-f")
+        .arg("claude")
         .output()
-    {
-        Ok(output) => output.status.success(),
-        Err(_) => false,
-    }
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 ```
 
@@ -155,24 +154,22 @@ Wait for Claude Code process to exit, with timeout.
 
 **Returns:**
 - `Ok(())` - Claude exited within timeout
-- `Err(ClaudeError::AgentTimeout)` - Timeout exceeded
-- `Err(ClaudeError::ProcessCheckFailed)` - pgrep failed
+- `Err(ClaudeError::ClaudeTimeout)` - Timeout exceeded
 
 **Implementation:**
 ```rust
 pub fn wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()> {
-    let start = Instant::now();
-    let timeout = Duration::from_secs(timeout_secs);
-    let poll_interval = Duration::from_secs(2);
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let start = std::time::Instant::now();
 
     while start.elapsed() < timeout {
         if !is_claude_running() {
             return Ok(());
         }
-        thread::sleep(poll_interval);
+        std::thread::sleep(std::time::Duration::from_secs(2));
     }
 
-    Err(ClaudeError::AgentTimeout)
+    Err(ClaudeError::ClaudeTimeout)
 }
 ```
 
@@ -189,15 +186,19 @@ Build a Claude Code command with the given prompt.
 **Example:**
 ```rust
 let cmd = build_agent_prompt("Run tests");
-// Returns: "claude \"Run tests\""
+// Returns: "claude --dangerously-skip-permissions \"Run tests\""
 ```
 
-**Shell Escaping:**
-The function properly escapes quotes and special characters:
-```rust
-let cmd = build_agent_prompt("Fix \"bug\" in code");
-// Returns: "claude \"Fix \\\"bug\\\" in code\""
-```
+#### `get_prompt(prompt_file: Option<&str>) -> Result<String, std::io::Error>`
+
+Read a prompt from a file, or return the default prompt.
+
+**Parameters:**
+- `prompt_file`: Optional path to a file containing the custom prompt
+
+**Returns:**
+- `Ok(String)` - The prompt (from file or default)
+- `Err(std::io::Error)` - File read error
 
 ## Constants
 
@@ -211,16 +212,6 @@ pub const OTTO_AGENT_PROMPT: &str =
 ```
 
 **Purpose:** This is the fixed prompt sent to all autonomous agents, ensuring consistent behavior across agent launches.
-
-### `DEFAULT_CLAUDE_TIMEOUT_SECS`
-
-Default timeout for Claude agent completion:
-
-```rust
-pub const DEFAULT_CLAUDE_TIMEOUT_SECS: u64 = 300;
-```
-
-**Value:** 300 seconds (5 minutes)
 
 ## Technical Implementation Details
 
@@ -242,7 +233,7 @@ The crate interacts with these system commands:
 
 #### 2. `pgrep -f claude`
 - **Purpose:** Check for running Claude processes
-- **Usage:** `Command::new("pgrep").args(["-f", "claude"]).output()`
+- **Usage:** `Command::new("pgrep").arg("-f").arg("claude").output()`
 - **Success Criteria:** Exit code 0 means process found
 - **Interpretation:** Exit code 1 means no process running
 
@@ -256,7 +247,7 @@ The crate uses polling-based process monitoring:
    - Run pgrep -f claude
    - If exit code 1: Claude exited (SUCCESS)
    - If exit code 0: Continue waiting
-3. If elapsed time >= timeout: Return AgentTimeout
+3. If elapsed time >= timeout: Return ClaudeTimeout
 ```
 
 **Advantages:**
@@ -272,24 +263,15 @@ The crate uses polling-based process monitoring:
 
 ### Shell Escaping
 
-Command construction uses shell escaping to handle special characters:
+Command construction includes the `--dangerously-skip-permissions` flag:
 
 ```rust
 pub fn build_agent_prompt(prompt: &str) -> String {
-    let escaped = prompt.replace('"', r#"\""#);
-    format!("claude \"{}\"", escaped)
+    format!("claude --dangerously-skip-permissions \"{}\"", prompt)
 }
 ```
 
-**Limitations:**
-- Basic escaping only (quotes)
-- Does not handle all shell metacharacters
-- Assumes trusted input (Otto's use case)
-
-**Future Enhancement:**
-- Use `shlex` crate for proper escaping
-- Support Windows command escaping
-- Handle edge cases (newlines, backticks)
+**Note:** This uses basic escaping. For production use with untrusted input, consider using the `shlex` crate for robust shell escaping.
 
 ## Integration with Otto Ecosystem
 
@@ -310,15 +292,15 @@ pub fn build_agent_prompt(prompt: &str) -> String {
                        ┌────────┼────────┐
                        │        │        │
                 ┌──────▼───┐ ┌─▼─────┐ ┌─▼──────────┐
-                │otto-claude│ │otto-  │ │ (future:   │
-                │          │ │tmux   │ │  other     │
+                │otto-agent-│ │otto-  │ │ (future:   │
+                │claude    │ │tmux   │ │  other     │
                 │          │ └───────┘ │  agents)   │
                 └──────────┘           └────────────┘
 ```
 
 ### Dependency Flow
 
-1. **otto-core** depends on **otto-claude** for Claude operations
+1. **otto-core** depends on **otto-agent-claude** for Claude operations
 2. **otto-core** depends on **otto-tmux** for session management
 3. **otto** depends on **otto-core** for agent orchestration
 
@@ -326,31 +308,30 @@ pub fn build_agent_prompt(prompt: &str) -> String {
 
 From `/home/mike/Development/otto/crates/otto-core/src/lib.rs`:
 
-**Before (current implementation):**
 ```rust
-// Claude code embedded in otto-core
-let has_claude = Command::new("claude")
-    .arg("--version")
-    .output()
-    .map(|o| o.status.success())
-    .unwrap_or(false);
+use otto_agent_claude::{
+    build_agent_prompt, get_prompt, is_claude_available, wait_for_claude_exit,
+    ClaudeError,
+};
 
-if !has_claude {
-    return Err(AgentError::ClaudeNotAvailable);
+pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> AgentResult<()> {
+    if !is_claude_available() {
+        return Err(AgentError::ClaudeNotAvailable);
+    }
+
+    ensure_otto_session()?;
+
+    let prompt = get_prompt(prompt_file)
+        .map_err(|e| AgentError::PromptFileError(prompt_file.unwrap_or("default").to_string(), e))?;
+
+    let claude_command = build_agent_prompt(&prompt);
+    send_otto_command(&claude_command)?;
+
+    let timeout = timeout_secs.unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS);
+    wait_for_claude_exit(timeout)?;
+
+    Ok(())
 }
-```
-
-**After (using otto-claude):**
-```rust
-use otto_claude::{is_claude_available, wait_for_claude_exit, ClaudeError};
-
-// Check availability
-if !is_claude_available() {
-    return Err(AgentError::ClaudeNotAvailable);
-}
-
-// Wait for completion
-wait_for_claude_exit(timeout_secs)?;
 ```
 
 ## Testing Considerations
@@ -363,27 +344,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_agent_prompt_constant() {
+    fn test_otto_agent_prompt_constant() {
         assert!(OTTO_AGENT_PROMPT.contains("bd ready"));
         assert!(OTTO_AGENT_PROMPT.contains("Exit when done"));
     }
 
     #[test]
-    fn test_default_timeout() {
-        assert_eq!(DEFAULT_CLAUDE_TIMEOUT_SECS, 300);
-    }
-
-    #[test]
     fn test_build_agent_prompt() {
-        let cmd = build_agent_prompt("test");
-        assert_eq!(cmd, "claude \"test\"");
+        let cmd = build_agent_prompt("test prompt");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("test prompt"));
     }
 
     #[test]
-    fn test_build_agent_prompt_with_quotes() {
-        let cmd = build_agent_prompt("say \"hello\"");
-        assert!(cmd.contains("say"));
-        assert!(cmd.contains("hello"));
+    fn test_get_prompt_default() {
+        let prompt = get_prompt(None).unwrap();
+        assert_eq!(prompt, OTTO_AGENT_PROMPT);
+    }
+
+    #[test]
+    fn test_get_prompt_file_not_found() {
+        let result = get_prompt(Some("/nonexistent/file.txt"));
+        assert!(result.is_err());
     }
 }
 ```
@@ -468,7 +450,7 @@ Integration tests would require Claude Code CLI to be installed:
 The crate constructs shell commands:
 
 ```rust
-format!("claude \"{}\"", escaped_prompt)
+format!("claude --dangerously-skip-permissions \"{}\"", prompt)
 ```
 
 **Risks:**
@@ -531,59 +513,6 @@ Not currently supported. Would require:
 - Different command escaping
 - Or WSL/Cygwin environment
 
-## Migration Guide
-
-### For otto-core
-
-**Step 1: Add dependency**
-
-In `crates/otto-core/Cargo.toml`:
-```toml
-[dependencies]
-otto-claude = { path = "../otto-claude" }
-```
-
-**Step 2: Update imports**
-
-Replace Claude-specific code:
-```rust
-// Old
-use crate::ClaudeNotAvailable;
-
-// New
-use otto_claude::{is_claude_available, wait_for_claude_exit, ClaudeError};
-```
-
-**Step 3: Replace Claude operations**
-
-```rust
-// Old
-let has_claude = Command::new("claude")
-    .arg("--version")
-    .output()
-    .map(|o| o.status.success())
-    .unwrap_or(false);
-
-// New
-let has_claude = is_claude_available();
-```
-
-**Step 4: Update error handling**
-
-```rust
-// Old
-pub enum AgentError {
-    ClaudeNotAvailable,
-    // ...
-}
-
-// New
-pub enum AgentError {
-    ClaudeNotAvailable(ClaudeError),  // Wrap the error
-    // ...
-}
-```
-
 ## Build Configuration
 
 **From workspace `Cargo.toml`:**
@@ -598,7 +527,7 @@ license = "MIT"
 **Crate `Cargo.toml`:**
 ```toml
 [package]
-name = "otto-claude"
+name = "otto-agent-claude"
 version.workspace = true
 edition.workspace = true
 
@@ -608,7 +537,7 @@ edition.workspace = true
 
 ## Conclusion
 
-The `otto-claude` crate provides a focused, reliable interface for Claude Code CLI interactions. Its design prioritizes:
+The `otto-agent-claude` crate provides a focused, reliable interface for Claude Code CLI interactions. Its design prioritizes:
 
 - **Separation of Concerns:** Claude-specific logic isolated from orchestration
 - **Testability:** Mockable interface for easy testing

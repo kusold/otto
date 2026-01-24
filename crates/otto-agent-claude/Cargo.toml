@@ -1,0 +1,6 @@
+[package]
+name = "otto-agent-claude"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

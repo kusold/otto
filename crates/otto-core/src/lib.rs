@@ -3,10 +3,11 @@
 //! Provides the main agent launching logic for spawning Claude Code agents
 //! within tmux sessions.
 
-use std::fs;
-use std::process::Command;
-use std::time::Duration;
 use otto_tmux::{ensure_otto_session, send_otto_command, TmuxError};
+use otto_agent_claude::{
+    build_agent_prompt, get_prompt, is_claude_available, wait_for_claude_exit,
+    ClaudeError,
+};
 
 /// Error type for agent operations.
 #[derive(Debug)]
@@ -43,49 +44,23 @@ impl From<TmuxError> for AgentError {
     }
 }
 
+impl From<ClaudeError> for AgentError {
+    fn from(err: ClaudeError) -> Self {
+        match err {
+            ClaudeError::ClaudeNotAvailable => AgentError::ClaudeNotAvailable,
+            ClaudeError::ClaudeTimeout => AgentError::AgentTimeout,
+            ClaudeError::ClaudeStartFailed(msg) => AgentError::AgentStartFailed(msg),
+            ClaudeError::ClaudeExecutionFailed(msg) => AgentError::AgentStartFailed(msg),
+            ClaudeError::VersionError(msg) => AgentError::AgentStartFailed(msg),
+        }
+    }
+}
+
 /// Result type for agent operations.
 pub type AgentResult<T> = Result<T, AgentError>;
 
-/// The fixed prompt used for all Claude Code agents launched by Otto.
-///
-/// This prompt directs the agent to:
-/// 1. Check for ready beads tasks
-/// 2. Choose one task
-/// 3. Work only on that task
-/// 4. Exit when done
-pub const OTTO_AGENT_PROMPT: &str =
-    "Run bd ready, choose a bead, begin work on only that bead. Exit when done.";
-
 /// Default timeout for agent completion (5 minutes).
 const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 300;
-
-/// Checks if Claude Code CLI is available.
-fn is_claude_available() -> bool {
-    Command::new("claude")
-        .arg("--version")
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-/// Reads a prompt from a file, or returns the default prompt.
-///
-/// # Arguments
-/// * `prompt_file` - Optional path to a file containing the custom prompt
-///
-/// # Returns
-/// - `Ok(String)` containing the prompt (from file or default)
-/// - `Err(AgentError::PromptFileError)` if the file cannot be read
-fn get_prompt(prompt_file: Option<&str>) -> Result<String, AgentError> {
-    match prompt_file {
-        Some(path) => {
-            fs::read_to_string(path)
-                .map(|s| s.trim().to_string())
-                .map_err(|e| AgentError::PromptFileError(path.to_string(), e))
-        }
-        None => Ok(OTTO_AGENT_PROMPT.to_string()),
-    }
-}
 
 /// Launches a Claude Code agent within the Otto tmux session.
 ///
@@ -115,38 +90,20 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
     ensure_otto_session()?;
 
     // Get the prompt from file or use default
-    let prompt = get_prompt(prompt_file)?;
+    let prompt = get_prompt(prompt_file)
+        .map_err(|e| AgentError::PromptFileError(prompt_file.unwrap_or("default").to_string(), e))?;
 
     // Construct the command to run claude with the prompt
-    let claude_command = format!("claude --dangerously-skip-permissions \"{}\"", prompt);
+    let claude_command = build_agent_prompt(&prompt);
 
     // Send the command to the tmux session
     send_otto_command(&claude_command)?;
 
     // Wait for the agent to complete
-    let timeout = Duration::from_secs(timeout_secs.unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS));
-    let start = std::time::Instant::now();
+    let timeout = timeout_secs.unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS);
+    wait_for_claude_exit(timeout)?;
 
-    // Poll to check if claude process is still running
-    while start.elapsed() < timeout {
-        // Check if there's a claude process running
-        let has_claude = Command::new("pgrep")
-            .arg("-f")
-            .arg("claude")
-            .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false);
-
-        if !has_claude {
-            // Agent has exited
-            return Ok(());
-        }
-
-        // Wait before checking again
-        std::thread::sleep(Duration::from_secs(2));
-    }
-
-    Err(AgentError::AgentTimeout)
+    Ok(())
 }
 
 /// Launches a Claude Code agent with the default timeout and optional prompt file.
@@ -166,12 +123,6 @@ pub fn launch_agent_default(prompt_file: Option<&str>) -> AgentResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_agent_prompt_constant() {
-        assert!(OTTO_AGENT_PROMPT.contains("bd ready"));
-        assert!(OTTO_AGENT_PROMPT.contains("Exit when done"));
-    }
 
     #[test]
     fn test_default_timeout() {

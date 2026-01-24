@@ -143,6 +143,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "otto-agent-claude"
+version = "0.1.0"
+
+[[package]]
 name = "otto-beads"
 version = "0.1.0"
 
@@ -150,6 +154,7 @@ version = "0.1.0"
 name = "otto-core"
 version = "0.1.0"
 dependencies = [
+ "otto-agent-claude",
  "otto-tmux",
 ]
 
