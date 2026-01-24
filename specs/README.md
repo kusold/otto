@@ -21,11 +21,11 @@ Otto is a command-line tool that autonomously executes AI coding agents in a con
                                      │
                     ┌────────────────┼────────────────┐
                     │                │                │
-            ┌───────▼────────┐ ┌────▼─────┐ ┌───────▼──────────┐
-            │   otto-claude  │ │otto-tmux │ │ (future: other  │
-            │  Claude CLI    │ │session   │ │  agent providers)│
-            │  interactions  │ │management│ └──────────────────┘
-            └────────────────┘ └──────────┘
+            ┌───────▼─────────┐  ┌───▼─────────┐  ┌──▼───────────┐
+            │   otto-claude   │  │  otto-tmux  │  │ (future:     │
+            │  Claude CLI     │  │  Session    │  │  other agent │
+            │  interactions   │  │  management │  │  providers)  │
+            └─────────────────┘  └─────────────┘  └──────────────┘
 ```
 
 ## Crate Specifications
