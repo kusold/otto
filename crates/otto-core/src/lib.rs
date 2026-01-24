@@ -118,7 +118,7 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
     let prompt = get_prompt(prompt_file)?;
 
     // Construct the command to run claude with the prompt
-    let claude_command = format!("claude \"{}\"", prompt);
+    let claude_command = format!("claude --dangerously-skip-permissions \"{}\"", prompt);
 
     // Send the command to the tmux session
     send_otto_command(&claude_command)?;
