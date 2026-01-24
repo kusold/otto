@@ -12,20 +12,21 @@ Otto is a command-line tool that autonomously executes AI coding agents in a con
 ┌─────────────────────────────────────────────────────────────┐
 │                        otto (CLI)                           │
 │  Main loop, signal handling, watch mode, graceful shutdown  │
-└───────────────┬────────────────────┬────────────────────────┘
-                │                    │
-        ┌───────▼─────────┐  ┌──────▼──────────┐
-        │   otto-beads    │  │   otto-core     │
-        │  Task checking  │  │ Agent orchestration│
-        └─────────────────┘  └──────┬──────────┘
-                                     │
-                    ┌────────────────┼────────────────┐
-                    │                │                │
-            ┌───────▼─────────┐  ┌───▼─────────┐  ┌──▼───────────┐
-            │   otto-claude   │  │  otto-tmux  │  │ (future:     │
-            │  Claude CLI     │  │  Session    │  │  other agent │
-            │  interactions   │  │  management │  │  providers)  │
-            └─────────────────┘  └─────────────┘  └──────────────┘
+└─────────────────┬──────────────────────┬───────────────────┘
+                  │                      │
+          ┌───────▼──────────┐    ┌──────▼───────────┐
+          │   otto-beads     │    │   otto-core      │
+          │  Task checking   │    │  Agent           │
+          └──────────────────┘    │  orchestration   │
+                                  └──────┬───────────┘
+                                         │
+                         ┌───────────────┼───────────────┐
+                         │               │               │
+                 ┌───────▼───────┐ ┌────▼──────┐ ┌─────▼──────────┐
+                 │  otto-claude  │ │ otto-tmux │ │ (future:       │
+                 │  Claude CLI  │ │  Session  │ │  other agent    │
+                 │ interactions │ │ management│ │  providers)    │
+                 └──────────────┘ └───────────┘ └────────────────┘
 ```
 
 ## Crate Specifications
