@@ -6,10 +6,10 @@
 pub mod color;
 
 use crate::color::print_progress;
-use otto_tmux::{ensure_otto_session, send_otto_command, TmuxError};
+use otto_tmux::{create_agent_window, ensure_otto_session, send_command_to_window, TmuxError};
 use otto_agent_claude::{
-    build_agent_prompt, get_prompt, is_claude_available, is_claude_process,
-    wait_for_claude_exit_with_progress, AbortCallback, ClaudeError,
+    build_agent_prompt, get_prompt, is_claude_available, is_claude_process, AbortCallback,
+    ClaudeError,
 };
 
 /// Error type for agent operations.
@@ -96,10 +96,11 @@ const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 ///
 /// This function:
 /// 1. Ensures the otto tmux session exists
-/// 2. Sends the claude command with the fixed prompt to the session
-/// 3. Waits for the agent to complete by checking if the process is still running
-/// 4. Shows progress on stderr while waiting (continuously rewritten line with elapsed time)
-/// 5. Tracks and returns the session duration
+/// 2. Creates a new tmux window with a unique 'ralph-*' name
+/// 3. Sends the claude command with the fixed prompt to that window
+/// 4. Waits for the agent to complete by checking the specific pane
+/// 5. Shows progress on stderr while waiting (continuously rewritten line with elapsed time)
+/// 6. Tracks and returns the session duration and window name
 ///
 /// # Arguments
 /// * `timeout_secs` - Maximum time to wait for agent completion (None for default)
@@ -107,7 +108,7 @@ const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 /// * `abort_callback` - Optional callback that returns true if agent should be aborted
 ///
 /// # Returns
-/// - `Ok(duration)` if the agent completed successfully, where duration is the session length
+/// - `Ok((duration, window_name))` if the agent completed successfully
 /// - `Err(AgentError::ClaudeNotAvailable)` if claude is not installed
 /// - `Err(AgentError::TmuxError)` if tmux operations fail
 /// - `Err(AgentError::AgentStartFailed)` if agent fails to start
@@ -118,7 +119,7 @@ pub fn launch_agent(
     timeout_secs: Option<u64>,
     prompt_file: Option<&str>,
     abort_callback: Option<AbortCallback>,
-) -> AgentResult<std::time::Duration> {
+) -> AgentResult<(std::time::Duration, String)> {
     let session_start = std::time::Instant::now();
 
     if !is_claude_available() {
@@ -128,6 +129,9 @@ pub fn launch_agent(
     // Ensure the otto tmux session exists
     ensure_otto_session()?;
 
+    // Create a new window with a unique agent name
+    let window_name = create_agent_window(otto_tmux::OTTO_SESSION_NAME)?;
+
     // Get the prompt from file or use default
     let prompt = get_prompt(prompt_file)
         .map_err(|e| AgentError::PromptFileError(prompt_file.unwrap_or("default").to_string(), e))?;
@@ -135,27 +139,45 @@ pub fn launch_agent(
     // Construct the command to run claude with the prompt
     let claude_command = build_agent_prompt(&prompt);
 
-    // Send the command to the tmux session
-    send_otto_command(&claude_command)?;
+    // Send the command to the specific window
+    send_command_to_window(otto_tmux::OTTO_SESSION_NAME, &window_name, &claude_command)?;
+
+    // Construct the pane spec for monitoring
+    // We need to find the pane number, but tmux will default to pane 0 for new windows
+    // Format: "session:window.pane" -> "otto:ralph-word.0"
+    let pane_spec = format!("{}:{}.0", otto_tmux::OTTO_SESSION_NAME, window_name);
 
     // Wait for the agent to complete with progress callback
     let timeout = timeout_secs.unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS);
 
-    // Define progress callback that updates stderr with elapsed time
-    let progress_callback = |elapsed: std::time::Duration| {
+    // Clone window_name for use in the progress callback
+    let window_name_for_display = window_name.clone();
+
+    // Define progress callback that updates stderr with elapsed time and window name
+    let progress_callback: Box<dyn Fn(std::time::Duration)> = Box::new(move |elapsed| {
         eprint!("\r");
-        print_progress(&format!("Agent working... ({})", format_duration(elapsed)));
+        print_progress(&format!(
+            "Agent working in {}... ({})",
+            window_name_for_display,
+            format_duration(elapsed)
+        ));
         // Note: print_progress doesn't add newline, so the carriage return above
         // ensures we overwrite the previous line
-    };
+    });
 
-    wait_for_claude_exit_with_progress(timeout, Some(progress_callback), abort_callback)?;
+    // Wait for Claude to exit in the specific pane
+    wait_for_claude_in_pane_with_progress(
+        &pane_spec,
+        timeout,
+        Some(progress_callback),
+        abort_callback,
+    )?;
 
     // Clear the progress line when done
     eprint!("\r{}\r", " ".repeat(80));
 
     let duration = session_start.elapsed();
-    Ok(duration)
+    Ok((duration, window_name))
 }
 
 /// Launches a Claude Code agent with the default timeout and optional prompt file.
@@ -167,12 +189,12 @@ pub fn launch_agent(
 /// * `abort_callback` - Optional callback that returns true if agent should be aborted
 ///
 /// # Returns
-/// - `Ok(duration)` if the agent completed successfully, where duration is the session length
+/// - `Ok((duration, window_name))` if the agent completed successfully
 /// - `Err` if there was an error
 pub fn launch_agent_default(
     prompt_file: Option<&str>,
     abort_callback: Option<AbortCallback>,
-) -> AgentResult<std::time::Duration> {
+) -> AgentResult<(std::time::Duration, String)> {
     launch_agent(None, prompt_file, abort_callback)
 }
 
@@ -253,6 +275,67 @@ pub fn wait_for_claude_in_pane(pane_spec: &str, timeout_secs: u64) -> AgentResul
         if !is_claude_active_in_pane(Some(pane_spec))? {
             return Ok(());
         }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+
+    Err(AgentError::AgentTimeout)
+}
+
+/// Waits for Claude to exit in a specific tmux pane, with progress callbacks.
+///
+/// Unlike `wait_for_claude_in_pane`, this function supports optional progress
+/// callbacks and abort checking.
+///
+/// # Arguments
+/// * `pane_spec` - The pane specification (e.g., "otto:ralph-word.0")
+/// * `timeout_secs` - Maximum time to wait in seconds
+/// * `progress_callback` - Optional callback for progress updates (boxed closure)
+/// * `abort_callback` - Optional callback that returns true if wait should be aborted
+///
+/// # Returns
+/// - `Ok(())` if Claude has exited from the pane
+/// - `Err(AgentError::AgentTimeout)` if timeout is reached
+pub fn wait_for_claude_in_pane_with_progress(
+    pane_spec: &str,
+    timeout_secs: u64,
+    progress_callback: Option<Box<dyn Fn(std::time::Duration)>>,
+    abort_callback: Option<AbortCallback>,
+) -> AgentResult<()> {
+    let timeout = std::time::Duration::from_secs(timeout_secs);
+    let start = std::time::Instant::now();
+
+    while start.elapsed() < timeout {
+        if !is_claude_active_in_pane(Some(pane_spec))? {
+            return Ok(());
+        }
+
+        // Check if abort is requested
+        if let Some(callback) = abort_callback {
+            if callback() {
+                // Abort requested - kill Claude process in this pane
+                if let Ok(Some(pid)) = otto_tmux::get_pane_pid(pane_spec) {
+                    // Kill the specific Claude process
+                    let _ = std::process::Command::new("kill")
+                        .arg(pid.to_string())
+                        .output();
+                    // Wait a bit for it to exit
+                    let kill_start = std::time::Instant::now();
+                    while kill_start.elapsed() < std::time::Duration::from_secs(5) {
+                        if !is_claude_active_in_pane(Some(pane_spec))? {
+                            return Ok(());
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                }
+                return Ok(());
+            }
+        }
+
+        // Call progress callback if provided
+        if let Some(callback) = &progress_callback {
+            callback(start.elapsed());
+        }
+
         std::thread::sleep(std::time::Duration::from_secs(2));
     }
 

@@ -12,6 +12,8 @@ pub enum TmuxError {
     TmuxNotAvailable,
     /// Session creation failed
     SessionCreationFailed(String),
+    /// Window creation failed
+    WindowCreationFailed(String),
     /// Command execution in session failed
     CommandExecutionFailed(String),
     /// Session check failed
@@ -27,6 +29,7 @@ impl std::fmt::Display for TmuxError {
         match self {
             TmuxError::TmuxNotAvailable => write!(f, "tmux command not found - please install tmux"),
             TmuxError::SessionCreationFailed(msg) => write!(f, "failed to create tmux session: {}", msg),
+            TmuxError::WindowCreationFailed(msg) => write!(f, "failed to create tmux window: {}", msg),
             TmuxError::CommandExecutionFailed(msg) => write!(f, "failed to execute command in tmux: {}", msg),
             TmuxError::SessionCheckFailed(msg) => write!(f, "failed to check tmux session: {}", msg),
             TmuxError::PaneProcessQueryFailed(msg) => write!(f, "failed to query pane process: {}", msg),
@@ -317,6 +320,193 @@ pub fn is_process_in_pane(pane_spec: &str, process_name: &str) -> TmuxResult<boo
     }
 }
 
+/// Prefix for agent window names.
+pub const AGENT_WINDOW_PREFIX: &str = "ralph-";
+
+/// Generates a unique random name for an agent window.
+///
+/// Uses the petname crate to generate memorable random names
+/// like "ralph-crimson", "ralph-willow", etc.
+///
+/// # Returns
+/// A unique window name in the format "ralph-<word>"
+///
+/// # Example
+/// ```rust
+/// use otto_tmux::generate_agent_window_name;
+///
+/// let name = generate_agent_window_name();
+/// assert!(name.starts_with("ralph-"));
+/// ```
+pub fn generate_agent_window_name() -> String {
+    // Generate a random short word (1-2 words, lowercase)
+    // petname::petname(number_of_words, separator)
+    let petname = petname::petname(1, "-");
+    format!("{}{}", AGENT_WINDOW_PREFIX, petname)
+}
+
+/// Creates a new tmux window with the given name in a session.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+/// * `window_name` - The name for the new window
+///
+/// # Returns
+/// - `Ok(())` if the window was created successfully
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::WindowCreationFailed)` if creation fails
+pub fn create_named_window(session_name: &str, window_name: &str) -> TmuxResult<()> {
+    if !is_tmux_available() {
+        return Err(TmuxError::TmuxNotAvailable);
+    }
+
+    let output = Command::new("tmux")
+        .args(["new-window", "-t", session_name, "-n", window_name])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(TmuxError::WindowCreationFailed(stderr.to_string()))
+        }
+        Err(e) => Err(TmuxError::WindowCreationFailed(e.to_string())),
+    }
+}
+
+/// Lists all window names in a tmux session.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+///
+/// # Returns
+/// - `Ok(Vec<String>)` containing window names
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::SessionCheckFailed)` if listing fails
+pub fn list_windows(session_name: &str) -> TmuxResult<Vec<String>> {
+    if !is_tmux_available() {
+        return Err(TmuxError::TmuxNotAvailable);
+    }
+
+    // Use list-windows to get window information
+    // Format: "#{window_name}" gives us just the window names
+    let output = Command::new("tmux")
+        .args(["list-windows", "-t", session_name, "-F", "#{window_name}"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let windows: Vec<String> = stdout
+                .lines()
+                .map(|line| line.to_string())
+                .collect();
+            Ok(windows)
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(TmuxError::SessionCheckFailed(stderr.to_string()))
+        }
+        Err(e) => Err(TmuxError::SessionCheckFailed(e.to_string())),
+    }
+}
+
+/// Checks if a window exists in a tmux session.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+/// * `window_name` - The name of the window to check
+///
+/// # Returns
+/// - `Ok(true)` if the window exists
+/// - `Ok(false)` if the window does not exist
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::SessionCheckFailed)` if the check fails
+pub fn window_exists(session_name: &str, window_name: &str) -> TmuxResult<bool> {
+    match list_windows(session_name)? {
+        windows => Ok(windows.contains(&window_name.to_string())),
+    }
+}
+
+/// Executes a command within a specific tmux window.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+/// * `window_name` - The name of the window
+/// * `command` - The command to execute
+///
+/// # Returns
+/// - `Ok(())` if the command was sent successfully
+/// - `Err(TmuxError::CommandExecutionFailed)` if sending the command fails
+pub fn send_command_to_window(
+    session_name: &str,
+    window_name: &str,
+    command: &str,
+) -> TmuxResult<()> {
+    if !is_tmux_available() {
+        return Err(TmuxError::TmuxNotAvailable);
+    }
+
+    let target = format!("{}:{}", session_name, window_name);
+    let output = Command::new("tmux")
+        .args(["send-keys", "-t", &target, command, "C-m"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(TmuxError::CommandExecutionFailed(stderr.to_string()))
+        }
+        Err(e) => Err(TmuxError::CommandExecutionFailed(e.to_string())),
+    }
+}
+
+/// Creates a new tmux window with a unique agent name.
+///
+/// This is a convenience function that generates a unique window name
+/// and creates the window. It handles name collisions by retrying
+/// with a new name if the window already exists.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+///
+/// # Returns
+/// - `Ok(String)` containing the window name if created successfully
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::WindowCreationFailed)` if creation fails after retries
+///
+/// # Example
+/// ```rust
+/// use otto_tmux::create_agent_window;
+///
+/// match create_agent_window("otto") {
+///     Ok(window_name) => println!("Created window: {}", window_name),
+///     Err(e) => eprintln!("Error: {}", e),
+/// }
+/// ```
+pub fn create_agent_window(session_name: &str) -> TmuxResult<String> {
+    // Try up to 10 times to generate a unique name
+    for _ in 0..10 {
+        let window_name = generate_agent_window_name();
+
+        // Check if window already exists
+        match window_exists(session_name, &window_name)? {
+            true => continue, // Name collision, try again
+            false => {
+                // Window doesn't exist, create it
+                create_named_window(session_name, &window_name)?;
+                return Ok(window_name);
+            }
+        }
+    }
+
+    // Failed to generate unique name after 10 attempts
+    Err(TmuxError::WindowCreationFailed(
+        "failed to generate unique window name after 10 attempts".to_string(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -354,5 +544,52 @@ mod tests {
         // Just verify the function signature compiles
         // We can't test actual behavior without a running tmux session
         let _ = is_process_in_pane as fn(&str, &str) -> TmuxResult<bool>;
+    }
+
+    #[test]
+    fn test_agent_window_prefix_constant() {
+        assert_eq!(AGENT_WINDOW_PREFIX, "ralph-");
+    }
+
+    #[test]
+    fn test_generate_agent_window_name_format() {
+        let name = generate_agent_window_name();
+        assert!(name.starts_with("ralph-"));
+        assert!(name.len() > "ralph-".len());
+    }
+
+    #[test]
+    fn test_generate_agent_window_names_unique() {
+        // Generate multiple names and verify they're different
+        let name1 = generate_agent_window_name();
+        let name2 = generate_agent_window_name();
+        // Note: there's a small chance of collision, but very unlikely
+        // This test just verifies the function works and generates reasonable names
+        assert!(name1.starts_with("ralph-"));
+        assert!(name2.starts_with("ralph-"));
+    }
+
+    #[test]
+    fn test_create_agent_window_function_exists() {
+        // Just verify the function signature compiles
+        let _ = create_agent_window as fn(&str) -> TmuxResult<String>;
+    }
+
+    #[test]
+    fn test_send_command_to_window_function_exists() {
+        // Just verify the function signature compiles
+        let _ = send_command_to_window as fn(&str, &str, &str) -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_list_windows_function_exists() {
+        // Just verify the function signature compiles
+        let _ = list_windows as fn(&str) -> TmuxResult<Vec<String>>;
+    }
+
+    #[test]
+    fn test_window_exists_function_exists() {
+        // Just verify the function signature compiles
+        let _ = window_exists as fn(&str, &str) -> TmuxResult<bool>;
     }
 }

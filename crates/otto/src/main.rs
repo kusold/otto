@@ -202,8 +202,12 @@ fn run_single_pass(prompt_file: Option<&str>) {
                     SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
                 };
                 match launch_agent_default(prompt_file, Some(abort_callback)) {
-                    Ok(duration) => {
-                        println!("Agent finished (duration: {})", format_duration(duration));
+                    Ok((duration, window_name)) => {
+                        println!(
+                            "Agent finished in {} (duration: {})",
+                            window_name,
+                            format_duration(duration)
+                        );
                     }
                     Err(AgentError::AgentTimeout) => {
                         print_warning("Agent timed out");
@@ -255,8 +259,12 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                     SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
                 };
                 match launch_agent_default(prompt_file, Some(abort_callback)) {
-                    Ok(duration) => {
-                        println!("Agent finished (duration: {})", format_duration(duration));
+                    Ok((duration, window_name)) => {
+                        println!(
+                            "Agent finished in {} (duration: {})",
+                            window_name,
+                            format_duration(duration)
+                        );
                     }
                     Err(AgentError::AgentTimeout) => {
                         print_warning("Agent timed out");
