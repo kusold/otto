@@ -228,7 +228,7 @@ pub fn wait_for_claude_exit_with_progress(
 /// # Returns
 /// A shell command string that can be executed
 pub fn build_agent_prompt(prompt: &str) -> String {
-    format!("claude --dangerously-skip-permissions --print \"{}\"", prompt)
+    format!("claude --dangerously-skip-permissions \"{}\"", prompt)
 }
 
 /// Reads a prompt from a file, or returns the default prompt.
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_build_agent_prompt() {
         let cmd = build_agent_prompt("test prompt");
-        assert!(cmd.contains("claude --dangerously-skip-permissions --print"));
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
         assert!(cmd.contains("test prompt"));
     }
 
