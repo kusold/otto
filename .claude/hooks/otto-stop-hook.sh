@@ -9,13 +9,13 @@
 #
 # This ensures that Claude only exits after completing the assigned task.
 
-set -euo pipefail
+set -uo pipefail
 
 # Read hook input from stdin (advanced stop hook API)
-HOOK_INPUT=$(cat)
+HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
 
 # Get transcript path from hook input
-TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path')
+TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path' 2>/dev/null || echo '')
 
 if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
     # No transcript - allow exit (shouldn't happen normally)
@@ -24,7 +24,7 @@ fi
 
 # Read last assistant message from transcript (JSONL format)
 # Check if there are any assistant messages
-if ! grep -q '"role":"assistant"' "$TRANSCRIPT_PATH"; then
+if ! grep -q '"role":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null; then
     # No assistant messages - allow exit
     exit 0
 fi
@@ -52,7 +52,7 @@ if [[ $? -ne 0 ]]; then
 fi
 
 # Check for task completion marker
-if echo "$LAST_OUTPUT" | grep -q "<PLANE-HAS-LANDED>"; then
+if echo "$LAST_OUTPUT" | grep -q "<PLANE-HAS-LANDED>" 2>/dev/null; then
     # Task complete - find and kill parent Claude process
     echo "✅ Plane has landed, terminating Claude..."
 
