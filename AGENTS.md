@@ -14,36 +14,42 @@ bd sync               # Sync with git
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+**When ending a work session**, follow the workflow below. The final step MUST be `otto done`.
 
-**MANDATORY WORKFLOW:**
+**PRE-WORK (before running otto done):**
 
 1. **File issues for remaining work** - Create issues for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. If you learn anything important, update the AGENTS.md nearest to the finding
 4. If you implemented a user story, make sure a markdown file in specs/ documents it. If you create a spec file, update the lookup table at specs/README.md
 5. **Update issue status** - Close finished work, update in-progress items
-6. **PUSH TO REMOTE** - This is MANDATORY:
-   ```bash
-   git pull --rebase
-   bd sync
-   git push
-   git status  # MUST show "up to date with origin"
-   ```
-7. **Clean up** - Clear stashes, prune remote branches
-8. **Verify** - All changes committed AND pushed
-9. **LAST MESSAGE** - Say <PLANE-HAS-LANDED> so that claude exits
+
+**FINAL STEP (run otto done):**
+
+```bash
+# Normal completion (work fully done and pushed):
+otto done
+
+# Escalation (blocked, needs human intervention):
+otto done --mode escalated
+```
+
+**What otto done does automatically:**
+- ✅ Validates git state (clean working tree, everything pushed)
+- ✅ Syncs beads to remote
+- ✅ Closes the hooked bead
+- ✅ Clears hook state
+- ✅ Exits Claude cleanly
 
 **CRITICAL RULES:**
-- Work is NOT complete until `git push` succeeds
-- NEVER stop before pushing - that leaves work stranded locally
-- NEVER say "ready to push when you are" - YOU must push
-- If push fails, resolve and retry until it succeeds
-- Ensure you say <PLANE-HAS-LANDED> after successfully completing all steps
+- Work is NOT complete until `otto done` succeeds
+- NEVER stop before running `otto done` - that leaves work stranded locally
+- If `otto done` fails, resolve the issue and retry
+- After `otto done` completes successfully, your session is complete
 
 ## Session Termination: `otto done`
 
-**IMPORTANT**: This section describes the NEW `otto done` command. During the transition, you may still see references to the old `<PLANE-HAS-LANDED>` protocol.
+The `otto done` command is the MANDATORY final step for session completion. It orchestrates all cleanup and validation.
 
 ### When to Use Escalated vs Completed Mode
 
@@ -77,24 +83,6 @@ otto done --mode escalated --status uncommitted   # Have uncommitted changes
 otto done --mode escalated --status unpushed      # Committed but not pushed
 ```
 
-### How to Resume Escalated Sessions
-
-When you escalate, the bead stays open and hook state is preserved:
-
-1. **Check what you were working on**:
-   ```bash
-   bd show <bead-id>    # From the escalation log or .beads/hook
-   ```
-
-2. **Resume work**:
-   - The hook bead is already set, just continue working
-   - Or use `otto ralph <bead-id>` to explicitly set it
-
-3. **When done, use completed mode**:
-   ```bash
-   otto done    # Normal completion when work is actually done
-   ```
-
 ### Best Practices for Escalation
 
 ✅ **DO escalate when**:
@@ -113,6 +101,52 @@ When you escalate, the bead stays open and hook state is preserved:
 - Use `--status` to indicate git state
 - The issue should describe what blocked you
 - Check `.beads/terminations.log` for escalation history
+
+### Troubleshooting
+
+**Problem: otto done fails with validation errors**
+
+Common causes:
+- Uncommitted changes: Run `git status` to see what needs to be committed
+- Unpushed commits: Run `git push` to push your work
+- Beads not synced: Run `bd sync` manually to fix sync issues
+
+Solution:
+1. Check git state: `git status`
+2. Commit any uncommitted work
+3. Push to remote: `git push`
+4. Sync beads: `bd sync`
+5. Retry: `otto done`
+
+**Problem: otto done hangs or doesn't exit**
+
+This usually means Claude is waiting for something. Check:
+- Are there background operations running?
+- Did a previous command fail silently?
+- Is there an interactive prompt?
+
+Solution:
+1. Check terminal for any prompts
+2. Try Ctrl+C to interrupt, then retry `otto done`
+3. If persistent, check `.beads/terminations.log` for clues
+
+**Problem: Need to resume after escalation**
+
+When you escalate, the bead stays open and hook state is preserved:
+
+1. **Check what you were working on**:
+   ```bash
+   bd show <bead-id>    # From the escalation log or .beads/hook
+   ```
+
+2. **Resume work**:
+   - The hook bead is already set, just continue working
+   - Or use `otto ralph <bead-id>` to explicitly set it
+
+3. **When done, use completed mode**:
+   ```bash
+   otto done    # Normal completion when work is actually done
+   ```
 
 ## Debugging Hooks
 
