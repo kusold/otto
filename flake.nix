@@ -95,7 +95,7 @@
         # Default app
         apps.default = {
           type = "app";
-          program = "${config.packages.default}/bin/otto";
+          program = "${self.packages.${system}.default}/bin/otto";
         };
       };
 
