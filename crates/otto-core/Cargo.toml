@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 otto-tmux = { path = "../otto-tmux" }
 otto-agent-claude = { path = "../otto-agent-claude" }
+termcolor = "1.4"

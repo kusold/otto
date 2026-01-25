@@ -1,6 +1,6 @@
 use clap::Parser;
 use otto_beads::{has_ready_tasks, BeadsError};
-use otto_core::{launch_agent_default, AgentError};
+use otto_core::{color::print_error, color::print_warning, launch_agent_default, AgentError};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Global shutdown flag, set by signal handlers
@@ -121,10 +121,10 @@ fn run_single_pass(prompt_file: Option<&str>) {
                         println!("Agent finished (duration: {})", format_duration(duration));
                     }
                     Err(AgentError::AgentTimeout) => {
-                        eprintln!("Warning: Agent timed out");
+                        print_warning("Agent timed out");
                     }
                     Err(e) => {
-                        eprintln!("Error launching agent: {}", e);
+                        print_error(&format!("launching agent: {}", e));
                         return;
                     }
                 }
@@ -141,11 +141,11 @@ fn run_single_pass(prompt_file: Option<&str>) {
                 return;
             }
             Err(BeadsError::NotInitialized) => {
-                eprintln!("Error: beads not initialized (no .beads directory)");
+                print_error("beads not initialized (no .beads directory)");
                 return;
             }
             Err(e) => {
-                eprintln!("Error checking for ready tasks: {}", e);
+                print_error(&format!("checking for ready tasks: {}", e));
                 return;
             }
         }
@@ -170,10 +170,10 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                         println!("Agent finished (duration: {})", format_duration(duration));
                     }
                     Err(AgentError::AgentTimeout) => {
-                        eprintln!("Warning: Agent timed out");
+                        print_warning("Agent timed out");
                     }
                     Err(e) => {
-                        eprintln!("Error launching agent: {}", e);
+                        print_error(&format!("launching agent: {}", e));
                         // In watch mode, continue on errors
                     }
                 }
@@ -198,11 +198,11 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                 }
             }
             Err(BeadsError::NotInitialized) => {
-                eprintln!("Error: beads not initialized (no .beads directory)");
+                print_error("beads not initialized (no .beads directory)");
                 return;
             }
             Err(e) => {
-                eprintln!("Error checking for ready tasks: {}", e);
+                print_error(&format!("checking for ready tasks: {}", e));
                 // In watch mode, continue on errors
 
                 // Sleep in 1-second intervals to allow shutdown checking

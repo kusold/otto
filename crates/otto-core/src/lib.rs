@@ -3,6 +3,9 @@
 //! Provides the main agent launching logic for spawning Claude Code agents
 //! within tmux sessions.
 
+pub mod color;
+
+use crate::color::print_progress;
 use otto_tmux::{ensure_otto_session, send_otto_command, TmuxError};
 use otto_agent_claude::{
     build_agent_prompt, get_prompt, is_claude_available, is_claude_process,
@@ -135,7 +138,10 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
 
     // Define progress callback that updates stderr with elapsed time
     let progress_callback = |elapsed: std::time::Duration| {
-        eprint!("\rAgent working... ({})", format_duration(elapsed));
+        eprint!("\r");
+        print_progress(&format!("Agent working... ({})", format_duration(elapsed)));
+        // Note: print_progress doesn't add newline, so the carriage return above
+        // ensures we overwrite the previous line
     };
 
     wait_for_claude_exit_with_progress(timeout, Some(progress_callback))?;
@@ -143,7 +149,8 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
     // Clear the progress line when done
     eprint!("\r{}\r", " ".repeat(80));
 
-    Ok(session_start.elapsed())
+    let duration = session_start.elapsed();
+    Ok(duration)
 }
 
 /// Launches a Claude Code agent with the default timeout and optional prompt file.
