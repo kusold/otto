@@ -41,3 +41,30 @@ bd sync               # Sync with git
 - If push fails, resolve and retry until it succeeds
 - Ensure you say <PLANE-HAS-LANDED> after successfully completing all steps
 
+## Debugging Hooks
+
+### Otto Stop Hook Debug Mode
+
+The `otto-stop-hook.sh` hook can run in verbose/debug mode to help diagnose issues with the exit blocking behavior.
+
+**Enable debug mode:**
+```bash
+export OTTO_STOP_HOOK_DEBUG=1
+# or
+export OTTO_DEBUG=1
+```
+
+**View debug logs:**
+```bash
+tail -f .beads/stop-hook.log
+```
+
+**What gets logged:**
+- Transcript path being checked
+- Last assistant message content (first 200 chars)
+- Whether `<PLANE-HAS-LANDED>` was found
+- Exit decision (allow or block)
+- Parent PID and Claude process detection
+
+This is useful when investigating why Claude is being blocked from exiting or when the hook is behaving unexpectedly.
+

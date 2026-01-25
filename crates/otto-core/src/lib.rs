@@ -7,7 +7,7 @@ pub mod color;
 
 use crate::color::print_progress;
 use otto_tmux::{
-    capture_pane, ensure_otto_session, find_idle_ralph_window, get_or_create_agent_window,
+    capture_pane, ensure_otto_session, get_or_create_agent_window,
     get_pane_pid, get_pane_spec, kill_window, list_windows_by_pattern, send_command_to_window,
     AGENT_WINDOW_PREFIX, OTTO_SESSION_NAME, TmuxError,
 };

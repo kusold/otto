@@ -656,57 +656,6 @@ pub fn kill_window(session_name: &str, window_name: &str) -> TmuxResult<()> {
     }
 }
 
-/// Checks if a pane is idle (no Claude process running).
-///
-/// A pane is considered idle if:
-/// - No process is running (None PID), OR
-/// - A shell process is running (bash, zsh, fish) - indicating Claude exited
-///
-/// # Arguments
-/// * `pane_spec` - The pane specification (e.g., "otto:ralph-xxx.0")
-///
-/// # Returns
-/// - `Ok(true)` if the pane is idle
-/// - `Ok(false)` if the pane has an active non-shell process
-/// - `Err` if there was an error querying the pane
-fn is_pane_idle(pane_spec: &str) -> TmuxResult<bool> {
-    match get_pane_command(pane_spec)? {
-        Some(command) => {
-            // Check if it's a shell process (bash, zsh, fish)
-            let shell_names = ["bash", "zsh", "fish", "sh"];
-            let is_shell = shell_names.iter().any(|shell| {
-                command.contains(shell) && !command.contains("claude")
-            });
-            Ok(is_shell)
-        }
-        None => Ok(true), // No process running = idle
-    }
-}
-
-/// Finds an idle ralph-* window in the otto session.
-///
-/// An idle window is one where:
-/// - No process is running, OR
-/// - Only a shell process is running (bash, zsh, fish)
-///
-/// # Returns
-/// - `Ok(Some(String))` containing the window name if an idle window is found
-/// - `Ok(None)` if no idle windows exist
-/// - `Err` if there was an error
-pub fn find_idle_ralph_window() -> TmuxResult<Option<String>> {
-    let ralph_windows = list_windows_by_pattern(OTTO_SESSION_NAME, AGENT_WINDOW_PREFIX)?;
-
-    for window_name in ralph_windows {
-        let pane_spec = get_pane_spec(OTTO_SESSION_NAME, &window_name);
-
-        if is_pane_idle(&pane_spec)? {
-            return Ok(Some(window_name));
-        }
-    }
-
-    Ok(None)
-}
-
 /// Captures the content of a pane.
 ///
 /// Returns the visible text content of the pane.
