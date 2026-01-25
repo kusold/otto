@@ -338,6 +338,129 @@ detect_issue_id() {
     return 0
 }
 
+# Logging functions
+log_termination_event() {
+    # Log termination events to .beads/terminations.log
+    local mode="$1"
+    local status="$2"  # success | failed
+    local message="${3:-}"
+
+    local timestamp
+    timestamp=$(date -Iseconds 2>/dev/null || date)
+
+    # Create log directory if it doesn't exist
+    mkdir -p "$(dirname "$LOG_FILE")"
+
+    # Log entry: timestamp | mode | status | issue_id | message
+    local log_entry="[$timestamp] mode=$mode status=$status issue=${ISSUE_ID:-none} $message"
+    echo "$log_entry" >> "$LOG_FILE"
+
+    log_debug "Logged termination event: $log_entry"
+}
+
+# Claude exit mechanism
+get_claude_parent_pid() {
+    # Get the parent PID of this script
+    # The parent should be the Claude Code process
+    local hook_pid
+    local parent_pid
+
+    hook_pid=$$
+    parent_pid=$(ps -o ppid= -p "$hook_pid" 2>/dev/null | tr -d ' ' || echo "")
+
+    if [[ -z "$parent_pid" ]]; then
+        log_debug "Could not determine parent PID"
+        return 1
+    fi
+
+    log_debug "Detected parent PID: $parent_pid"
+    echo "$parent_pid"
+    return 0
+}
+
+verify_claude_process() {
+    # Verify that the given PID is actually a Claude process
+    local pid="$1"
+
+    if ! ps -p "$pid" >/dev/null 2>&1; then
+        log_debug "Process $pid does not exist"
+        return 1
+    fi
+
+    local cmd
+    cmd=$(ps -p "$pid" -o command= 2>/dev/null || echo "")
+
+    # Check if it's a Claude process (flexible matching)
+    if echo "$cmd" | grep -qi "claude"; then
+        log_debug "Confirmed PID $pid is a Claude process: $cmd"
+        return 0
+    fi
+
+    # Also accept if the command contains node/electron and claude
+    if echo "$cmd" | grep -qE "(node|electron|Code)" && echo "$cmd" | grep -qi "claude"; then
+        log_debug "Confirmed PID $pid is likely Claude: $cmd"
+        return 0
+    fi
+
+    log_debug "PID $pid does not appear to be Claude: $cmd"
+    return 1
+}
+
+exit_claude() {
+    # Trigger Claude Code shutdown by sending SIGTERM to parent process
+    local mode="$1"
+    local timeout="${2:-5}"  # Default 5 second timeout
+
+    log_debug "Attempting to exit Claude (mode: $mode, timeout: ${timeout}s)"
+
+    # Get Claude parent PID
+    local parent_pid
+    if ! parent_pid=$(get_claude_parent_pid); then
+        log_error "Could not determine Claude parent PID"
+        return 1
+    fi
+
+    # Verify it's actually Claude
+    if ! verify_claude_process "$parent_pid"; then
+        log_warning "Parent PID $parent_pid does not appear to be Claude"
+        log_warning "Skipping exit - may already be terminated or different process"
+        return 0
+    fi
+
+    # Send SIGTERM for graceful shutdown
+    log_debug "Sending SIGTERM to Claude PID: $parent_pid"
+    kill -TERM "$parent_pid" 2>/dev/null || true
+
+    # Wait for process to terminate with timeout
+    local count=0
+    while [[ $count -lt $timeout ]]; do
+        if ! ps -p "$parent_pid" >/dev/null 2>&1; then
+            log_debug "Claude process terminated successfully (${count}s)"
+            return 0
+        fi
+        sleep 1
+        ((count++))
+    done
+
+    # Timeout - force kill with SIGKILL
+    if ps -p "$parent_pid" >/dev/null 2>&1; then
+        log_warning "Claude did not terminate gracefully after ${timeout}s, forcing..."
+        kill -KILL "$parent_pid" 2>/dev/null || true
+        sleep 1
+
+        # Final check
+        if ! ps -p "$parent_pid" >/dev/null 2>&1; then
+            log_debug "Claude process force-terminated"
+            return 0
+        else
+            log_error "Failed to terminate Claude process $parent_pid"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
 # Main execution
 main() {
     # Parse arguments first
@@ -364,48 +487,95 @@ main() {
 
     # TODO: Implement the actual termination logic in future tasks:
     # - otto-gko.3: Implement beads sync and close logic
-    # - otto-gko.4: Implement Claude exit mechanism
     # - otto-gko.5: Implement completed exit mode
     # - otto-gko.6: Implement escalated exit mode
+    # - otto-gko.4: ✓ Implement Claude exit mechanism (THIS TASK)
+
+    local exit_success=0
+    local exit_message=""
 
     if [[ "$MODE" == "completed" ]]; then
         log_info "Step 1: Validating git state..."
         if [[ "$DRY_RUN" == "1" ]]; then
             log_info "  [DRY RUN] Would validate git state (skipped in dry-run)"
+            exit_success=1
         else
             if ! validate_git_state; then
                 echo ""
                 log_error "Git state validation failed"
                 log_info "Please fix the issues above before running 'otto done'"
+
+                # Log failed validation
+                log_termination_event "completed" "failed" "validation failed"
+
                 exit 1
             fi
             log_success "Git state validation passed"
+            exit_success=1
+            exit_message="git validation passed"
         fi
 
-        log_info "Completed mode workflow (in progress):"
-        log_info "  ✓ Validate working directory clean"
-        log_info "  ✓ Validate all commits pushed"
-        log_info "  3. Run bd sync (TODO: otto-gko.3)"
-        log_info "  4. Close hooked bead (if any) (TODO: otto-gko.3)"
-        log_info "  5. Clear hook bead (TODO: otto-gko.3)"
-        log_info "  6. Log completion event (TODO: otto-gko.5)"
-        log_info "  7. Exit Claude cleanly (TODO: otto-gko.4)"
+        # TODO: otto-gko.3 - Beads sync and close logic
+        log_info "Step 2: Run bd sync (TODO: otto-gko.3)"
+        log_info "Step 3: Close hooked bead (TODO: otto-gko.3)"
+        log_info "Step 4: Clear hook bead (TODO: otto-gko.3)"
+
+        # Step 5: Log completion event
+        log_termination_event "completed" "success" "$exit_message"
+
+        # Step 6: Exit Claude cleanly
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "Step 5: [DRY RUN] Would exit Claude cleanly"
+        else
+            log_info "Step 5: Exiting Claude cleanly..."
+            if exit_claude "completed" 5; then
+                log_success "Claude exit initiated"
+            else
+                log_warning "Claude exit encountered issues (may have already exited)"
+            fi
+        fi
     else
-        log_info "Escalated mode workflow (in progress):"
-        log_info "  ✓ Skip validation"
-        log_info "  2. Log escalation event with state: ${STATUS_OBSERVATION:-unknown} (TODO: otto-gko.6)"
-        log_info "  3. Leave hook bead set for recovery (TODO: otto-gko.6)"
-        log_info "  4. Exit Claude cleanly (TODO: otto-gko.4)"
+        # Escalated mode
+        log_info "Escalated mode workflow:"
+        log_info "  ✓ Skip validation (escalated mode)"
+        log_info "  ✓ Git state observation: ${STATUS_OBSERVATION:-unknown}"
+
+        # TODO: otto-gko.6 - Escalated mode enhancements
+        # Step 2: Log escalation event
+        local escalated_msg="escalated with state: ${STATUS_OBSERVATION:-unknown}"
+        log_termination_event "escalated" "success" "$escalated_msg"
+
+        # TODO: otto-gko.6 - Leave hook bead set for recovery
+        log_info "Step 3: Leave hook bead set for recovery (TODO: otto-gko.6)"
+
+        # Step 4: Exit Claude cleanly
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "Step 4: [DRY RUN] Would exit Claude cleanly"
+        else
+            log_info "Step 4: Exiting Claude cleanly..."
+            if exit_claude "escalated" 5; then
+                log_success "Claude exit initiated"
+            else
+                log_warning "Claude exit encountered issues (may have already exited)"
+            fi
+        fi
     fi
 
     echo ""
-    log_success "Git validation implemented successfully"
-    log_info "Remaining implementation in tasks otto-gko.3 through otto-gko.6"
+
+    if [[ "$exit_success" -eq 1 ]]; then
+        log_success "Termination sequence complete"
+    else
+        log_info "Termination sequence complete"
+    fi
 
     if [[ "$DRY_RUN" == "1" ]]; then
         echo ""
         log_info "Dry run complete - no changes made"
+        log_info "Exit mechanism would have been triggered"
     fi
+
+    log_debug "Remaining implementation in tasks otto-gko.3, otto-gko.5, otto-gko.6"
 }
 
 main "$@"
