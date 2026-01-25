@@ -1,15 +1,14 @@
 {
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": {},
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/otto-stop-hook.sh"
-          }
-        ]
-      }
-    ]
-  }
+	"hooks": {
+		"Stop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": ".claude/hooks/otto-stop-hook.sh"
+					}
+				]
+			}
+		]
+	}
 }
