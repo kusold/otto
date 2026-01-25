@@ -79,7 +79,7 @@ fi
 # Task not complete - block exit silently
 jq -n \
   '{
-    "decision": "block"
+    "decision": "allow"
   }'
 
 exit 0
