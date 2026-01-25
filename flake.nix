@@ -62,12 +62,12 @@
           packages = with pkgs; [
             # Core development tools
             pkg-config
+            prek
 
             # Additional tools can be added here, e.g.:
             # tmux
             # just
             # jq
-            # Note: prek is not available in all nixpkgs versions
           ];
 
           # Environment variables
