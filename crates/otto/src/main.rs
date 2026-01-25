@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use otto_agent_claude::AbortCallback;
 use otto_beads::{has_ready_tasks, BeadsError};
 use otto_core::{color::print_error, color::print_warning, launch_agent_default, AgentError};
@@ -21,19 +21,31 @@ static SHUTDOWN_COUNT: AtomicU8 = AtomicU8::new(0);
 #[command(version, about, long_about = None)]
 #[command(author = "Mike Kusold")]
 struct Args {
-    /// Run in watch mode (loop forever, checking for ready tasks)
-    ///
-    /// When enabled, otto will continuously loop and spawn agents for ready tasks.
-    /// When disabled, otto will stop when no ready tasks are found.
-    #[arg(long, short = 'w')]
-    watch: bool,
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
 
-    /// Path to a custom prompt file for Claude Code agents
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Run the agent loop (default behavior)
     ///
-    /// If provided, reads the prompt from this file. Otherwise, uses the default
-    /// OTTO_AGENT_PROMPT.
-    #[arg(long, short = 'p')]
-    prompt_file: Option<String>,
+    /// Continuously checks for ready-to-work beads tasks and spawns
+    /// Claude Code agents to complete them.
+    Ralph {
+        /// Run in watch mode (loop forever, checking for ready tasks)
+        ///
+        /// When enabled, otto will continuously loop and spawn agents for ready tasks.
+        /// When disabled, otto will stop when no ready tasks are found.
+        #[arg(long, short = 'w')]
+        watch: bool,
+
+        /// Path to a custom prompt file for Claude Code agents
+        ///
+        /// If provided, reads the prompt from this file. Otherwise, uses the default
+        /// OTTO_AGENT_PROMPT.
+        #[arg(long, short = 'p')]
+        prompt_file: Option<String>,
+    },
 }
 
 /// Formats a duration into a human-readable string.
@@ -113,16 +125,34 @@ fn main() {
     // Set up signal handlers for graceful shutdown
     setup_signal_handlers();
 
-    // Convert the prompt_file Option<String> to Option<&str>
-    let prompt_file = args.prompt_file.as_deref();
+    match args.command {
+        Some(Commands::Ralph { watch, prompt_file }) => {
+            // Convert the prompt_file Option<String> to Option<&str>
+            let prompt_file = prompt_file.as_deref();
 
-    if args.watch {
-        println!("Otto running in watch mode (infinite loop)");
-        println!("Press Ctrl+C to stop\n");
-        run_watch_loop(prompt_file);
-    } else {
-        println!("Otto running in single-pass mode\n");
-        run_single_pass(prompt_file);
+            if watch {
+                println!("Otto running in watch mode (infinite loop)");
+                println!("Press Ctrl+C to stop\n");
+                run_watch_loop(prompt_file);
+            } else {
+                println!("Otto running in single-pass mode\n");
+                run_single_pass(prompt_file);
+            }
+        }
+        None => {
+            // No subcommand provided, print help
+            println!("Otto - Autonomous agent runner for beads tasks\n");
+            println!("Usage: otto <COMMAND>\n");
+            println!("Commands:");
+            println!("  ralph  Run the agent loop (default behavior)");
+            println!("\nFlags:");
+            println!("  -h, --help     Print help");
+            println!("  -V, --version  Print version");
+            println!("\nExamples:");
+            println!("  otto ralph              Run in single-pass mode");
+            println!("  otto ralph --watch      Run in watch mode (infinite loop)");
+            println!("  otto ralph -p promp.txt Use custom prompt file");
+        }
     }
 }
 
