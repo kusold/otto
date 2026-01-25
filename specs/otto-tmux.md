@@ -47,6 +47,16 @@ Sends commands to running tmux sessions, which are executed as if typed directly
 
 Provides wrapper functions for the default "otto" session, simplifying common operations.
 
+### 7. Window Management
+
+Provides functions for managing tmux windows within sessions:
+
+- **List windows**: Get all window names in a session
+- **Check window existence**: Verify if a window exists
+- **Create named windows**: Create windows with specific names
+- **Send commands to windows**: Execute commands in specific windows
+- **Kill windows**: Remove windows from sessions
+
 ## Tmux Integration Details
 
 ### Tmux Commands Used
@@ -163,8 +173,11 @@ This design allows Otto to:
 pub enum TmuxError {
     TmuxNotAvailable,
     SessionCreationFailed(String),
+    WindowCreationFailed(String),
     CommandExecutionFailed(String),
     SessionCheckFailed(String),
+    PaneProcessQueryFailed(String),
+    InvalidPaneSpec(String),
 }
 ```
 
@@ -179,15 +192,33 @@ pub enum TmuxError {
   - Contains stderr output from tmux command
   - Occurs when: `tmux new-session` returns non-zero exit code
 
+- **WindowCreationFailed(String)**: Window creation failed
+  - Display message: "failed to create tmux window: {msg}"
+  - Contains stderr output from tmux command
+  - Occurs when: `tmux new-window` returns non-zero exit code
+  - Also occurs when: collision retry limit exceeded (10 attempts)
+
 - **CommandExecutionFailed(String)**: Command sending failed
   - Display message: "failed to execute command in tmux: {msg}"
   - Contains stderr output from tmux command
   - Occurs when: `tmux send-keys` returns non-zero exit code
+  - Also occurs when: other tmux commands (capture-pane, kill-window, etc.) fail
 
 - **SessionCheckFailed(String)**: Session existence check failed
   - Display message: "failed to check tmux session: {msg}"
   - Contains underlying IO error details
   - Occurs when: `tmux has-session` command cannot be executed
+  - Also occurs when: `list-windows` command fails
+
+- **PaneProcessQueryFailed(String)**: Pane PID query failed
+  - Display message: "failed to query pane process: {msg}"
+  - Contains error details from tmux or PID parsing
+  - Occurs when: `tmux display-message` fails or returns invalid PID
+
+- **InvalidPaneSpec(String)**: Invalid pane specification format
+  - Display message: "invalid pane specification: {spec}"
+  - Contains the invalid pane spec string
+  - Occurs when: pane spec doesn't contain `:` or `.` characters
 
 **Trait Implementations:**
 - `Debug`: Enables error debugging
@@ -206,9 +237,13 @@ Convenience type alias for all crate functions, simplifying error handling.
 
 ```rust
 pub const OTTO_SESSION_NAME: &str = "otto";
+pub const AGENT_WINDOW_PREFIX: &str = "ralph-";
 ```
 
-The default session name used throughout the Otto system. This is a compile-time constant that ensures consistency across the codebase.
+- **OTTO_SESSION_NAME**: The default session name used throughout the Otto system
+- **AGENT_WINDOW_PREFIX**: The prefix for agent window names (e.g., "ralph-crimson")
+
+These are compile-time constants that ensure consistency across the codebase.
 
 ### Internal Functions
 
@@ -280,18 +315,20 @@ let stderr = String::from_utf8_lossy(&output.stderr);
 - Never panics on malformed output
 - Suitable for error messages where exact byte representation isn't critical
 
-### Zero Dependencies
+### Dependencies
 
-The crate has no external dependencies:
+The crate has minimal external dependencies:
 
 ```toml
 [dependencies]
-# Empty - uses only std library
+petname = "0.2"
 ```
 
+**petname** is used for generating random memorable names for agent windows (e.g., "ralph-crimson", "ralph-willow").
+
 **Benefits:**
-- Fast compilation
-- Minimal binary size
+- Fast compilation (single lightweight dependency)
+- Minimal binary size increase
 - Reduced attack surface
 - No dependency conflicts
 - Easy to maintain
@@ -683,6 +720,392 @@ The implementation handles edge cases:
 3. **Invalid PID**: Returns error if PID parsing fails
 4. **Missing /proc**: Returns error (platform limitation)
 
+## Agent Window Management
+
+As of v0.1.0, the crate includes functionality for managing dedicated windows for Claude Code agents. These windows provide isolated execution environments for multiple agents running concurrently.
+
+### Agent Window Naming
+
+Agent windows use the prefix `"ralph-"` combined with a random memorable name:
+
+```rust
+pub const AGENT_WINDOW_PREFIX: &str = "ralph-";
+```
+
+**Example window names:**
+- `ralph-crimson`
+- `ralph-willow`
+- `ralph-zebra`
+- `ralph-meadow`
+
+The random suffix is generated using the `petname` crate, which produces short, memorable words.
+
+### Core Functions
+
+#### generate_agent_window_name()
+
+```rust
+pub fn generate_agent_window_name() -> String
+```
+
+Generates a unique random name for an agent window.
+
+**Returns:** A window name in the format `"ralph-<word>"`
+
+**Example:**
+```rust
+let name = generate_agent_window_name();
+// Result: "ralph-crimson", "ralph-willow", etc.
+```
+
+#### create_named_window()
+
+```rust
+pub fn create_named_window(session_name: &str, window_name: &str) -> TmuxResult<()>
+```
+
+Creates a new tmux window with a specific name in a session.
+
+**How it works:**
+1. Validates tmux is available
+2. Executes `tmux new-window -t <session> -n <name>`
+3. Returns success or `WindowCreationFailed` error
+
+**Example:**
+```rust
+create_named_window("otto", "my-window")?;
+```
+
+#### create_agent_window()
+
+```rust
+pub fn create_agent_window(session_name: &str) -> TmuxResult<String>
+```
+
+Creates a new window with a unique agent name, handling collisions.
+
+**Collision Detection:**
+- Generates a random name
+- Checks if window already exists
+- Retries up to 10 times with new names
+- Returns `WindowCreationFailed` if all attempts collide
+
+**Example:**
+```rust
+let window_name = create_agent_window("otto")?;
+// Result: Some unique name like "ralph-crimson"
+```
+
+#### find_idle_agent_window()
+
+```rust
+pub fn find_idle_agent_window(session_name: &str) -> TmuxResult<Option<String>>
+```
+
+Finds an existing agent window that is not running Claude.
+
+A window is considered "idle" if:
+- No process is running (just a shell prompt)
+- A process is running but it's not Claude
+
+**How it works:**
+1. Lists all windows matching `"ralph-*"` pattern
+2. For each window, gets the pane PID
+3. Reads `/proc/<pid>/cmdline` to check process
+4. Returns first window not running Claude
+
+**Example:**
+```rust
+match find_idle_agent_window("otto")? {
+    Some(window) => println!("Reusing window: {}", window),
+    None => println!("No idle windows available"),
+}
+```
+
+#### get_or_create_agent_window()
+
+```rust
+pub fn get_or_create_agent_window(session_name: &str) -> TmuxResult<String>
+```
+
+Gets or creates an agent window, preferring to reuse idle windows.
+
+**Strategy:**
+1. First tries to find an idle agent window
+2. If found, returns that window (reuse)
+3. If none found, creates a new window
+
+**Example:**
+```rust
+let window = get_or_create_agent_window("otto")?;
+// Either reuses an idle window or creates a new one
+```
+
+#### list_windows_by_pattern()
+
+```rust
+pub fn list_windows_by_pattern(session_name: &str, pattern: &str) -> TmuxResult<Vec<String>>
+```
+
+Lists windows matching a substring pattern.
+
+**Example:**
+```rust
+let agent_windows = list_windows_by_pattern("otto", "ralph-")?;
+// Result: ["ralph-crimson", "ralph-willow", ...]
+```
+
+#### list_windows()
+
+```rust
+pub fn list_windows(session_name: &str) -> TmuxResult<Vec<String>>
+```
+
+Lists all window names in a session.
+
+**Example:**
+```rust
+let windows = list_windows("otto")?;
+// Result: ["otto", "ralph-crimson", "bash", ...]
+```
+
+#### window_exists()
+
+```rust
+pub fn window_exists(session_name: &str, window_name: &str) -> TmuxResult<bool>
+```
+
+Checks if a window exists in a session.
+
+**Example:**
+```rust
+if window_exists("otto", "ralph-crimson")? {
+    println!("Window exists");
+}
+```
+
+#### send_command_to_window()
+
+```rust
+pub fn send_command_to_window(session_name: &str, window_name: &str, command: &str) -> TmuxResult<()>
+```
+
+Sends a command to a specific window.
+
+**Example:**
+```rust
+send_command_to_window("otto", "ralph-crimson", "cargo build")?;
+```
+
+#### get_pane_spec()
+
+```rust
+pub fn get_pane_spec(session_name: &str, window_name: &str) -> String
+```
+
+Constructs a pane specification for a window.
+
+**Returns:** A string in the format `"session:window.0"`
+
+**Example:**
+```rust
+let pane = get_pane_spec("otto", "ralph-crimson");
+// Result: "otto:ralph-crimson.0"
+```
+
+#### kill_window()
+
+```rust
+pub fn kill_window(session_name: &str, window_name: &str) -> TmuxResult<()>
+```
+
+Kills (closes) a window in a session.
+
+**Idempotent:** Returns success if window doesn't exist (already gone).
+
+**Example:**
+```rust
+kill_window("otto", "ralph-crimson")?;
+// Window is closed, no error if already gone
+```
+
+### Window Reuse Strategy
+
+The crate implements a **window reuse strategy** to minimize resource usage:
+
+1. **Before creating:** Check for idle agent windows
+2. **Idle detection:** Window is idle if Claude is not running
+3. **Reuse:** Send command to idle window instead of creating new
+4. **Fallback:** Create new window only if no idle windows available
+
+This strategy:
+- Reduces tmux window proliferation
+- Efficiently uses existing windows
+- Automatically cleans up when agents complete
+- Supports concurrent agent execution
+
+### Use Cases
+
+#### 1. Single Agent Execution
+
+```rust
+let window = get_or_create_agent_window("otto")?;
+send_command_to_window("otto", &window, "claude 'Run tests'")?;
+```
+
+#### 2. Multiple Concurrent Agents
+
+```rust
+// First agent
+let window1 = get_or_create_agent_window("otto")?;
+send_command_to_window("otto", &window1, "claude 'Build project'")?;
+
+// Second agent (gets different window)
+let window2 = get_or_create_agent_window("otto")?;
+send_command_to_window("otto", &window2, "claude 'Run tests'")?;
+
+// Both agents run in separate windows
+```
+
+#### 3. Reuse After Completion
+
+```rust
+// First run
+let window = get_or_create_agent_window("otto")?;
+send_command_to_window("otto", &window, "claude 'Task 1'")?;
+// ... wait for completion ...
+
+// Second run - reuses same window if idle
+let window = get_or_create_agent_window("otto")?;
+send_command_to_window("otto", &window, "claude 'Task 2'")?;
+```
+
+#### 4. List and Inspect
+
+```rust
+let agent_windows = list_windows_by_pattern("otto", "ralph-")?;
+println!("Active agent windows: {:?}", agent_windows);
+
+for window in agent_windows {
+    let pane = get_pane_spec("otto", &window);
+    if let Some(cmd) = get_pane_command(&pane)? {
+        println!("  {}: {}", window, cmd);
+    }
+}
+```
+
+### Error Handling
+
+Window management introduces the `WindowCreationFailed` error variant:
+
+```rust
+pub enum TmuxError {
+    // ... existing variants ...
+    WindowCreationFailed(String),
+}
+```
+
+**Causes:**
+- tmux command fails
+- Session doesn't exist
+- Invalid window name
+- Collision retry limit exceeded
+
+## Advanced Features
+
+The crate provides advanced features for pane interaction and session attachment.
+
+### capture_pane()
+
+```rust
+pub fn capture_pane(pane_spec: &str) -> TmuxResult<String>
+```
+
+Captures the visible text content of a pane.
+
+**How it works:**
+1. Executes `tmux capture-pane -t <pane_spec> -p -S -1000`
+2. Captures up to 1000 lines of scrollback
+3. Returns the content as a string
+
+**Returns:**
+- `Ok(String)` - Pane content (empty if pane doesn't exist)
+- `Err(TmuxError::TmuxNotAvailable)` - tmux not installed
+- `Err(TmuxError::CommandExecutionFailed)` - capture failed
+
+**Example:**
+```rust
+let content = capture_pane("otto:ralph-crimson.0")?;
+println!("Pane output:\n{}", content);
+```
+
+**Use Cases:**
+- Read agent output after completion
+- Monitor agent progress
+- Extract results from pane
+- Debug pane state
+
+**Graceful Degradation:**
+- Returns empty string if pane doesn't exist
+- No error for missing panes
+- Useful for optional output capture
+
+### attach_to_window()
+
+```rust
+#[cfg(unix)]
+pub fn attach_to_window(session_name: &str, window_name: &str) -> TmuxResult<()>
+```
+
+Attaches the current terminal to a tmux window, replacing the otto process.
+
+**How it works:**
+1. Validates tmux is available
+2. Uses `std::process::Command::exec()` to replace current process
+3. Executes `tmux attach-session -t <session>:<window>`
+4. Never returns on success (process replaced)
+
+**Platform Support:**
+- **Unix/Linux/macOS**: Full support via `exec()`
+- **Windows**: Not available (returns error)
+
+**Example:**
+```rust
+attach_to_window("otto", "ralph-crimson")?;
+// Never reaches here on success - process is now tmux
+```
+
+**Use Cases:**
+- Manual observation of agent work
+- Interactive debugging
+- Direct terminal access to agent window
+- User-initiated attachment
+
+**Important Notes:**
+- Process replacement means otto code stops executing
+- No cleanup code runs after successful attach
+- User is now directly interacting with tmux
+- On attach failure, function returns error
+
+**Error Handling:**
+- `TmuxError::TmuxNotAvailable` - tmux not installed
+- `TmuxError::CommandExecutionFailed` - attach failed (process not replaced)
+
+### Non-Unix Platform Behavior
+
+On non-Unix platforms, `attach_to_window()` is defined but returns an error:
+
+```rust
+#[cfg(not(unix))]
+pub fn attach_to_window(session_name: &str, window_name: &str) -> TmuxResult<()> {
+    Err(TmuxError::CommandExecutionFailed(
+        "attach is only supported on Unix platforms".to_string(),
+    ))
+}
+```
+
+This ensures compile-time compatibility while providing clear error messages at runtime.
+
 ### Security Considerations
 
 #### PID Validation
@@ -752,10 +1175,8 @@ The crate uses synchronous process spawning, not async:
 
 1. **Session listing**: Function to list all otto sessions
 2. **Session cleanup**: Function to kill/terminate sessions
-3. **Window management**: Support for multiple windows per session
-4. **Pane management**: Support for split panes ~~(PARTIALLY IMPLEMENTED: get_pane_pid, get_pane_command, is_process_in_pane)~~
-5. **Output capture**: Capture command output from sessions
-6. **Session status**: Check if session is active/idle
+3. **Pane management**: Support for split panes and multiple panes per window
+4. **Session status**: Check if session is active/idle
 
 ### Limitations
 
