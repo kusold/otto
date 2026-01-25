@@ -5,6 +5,9 @@
 
 use std::process::Command;
 
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
 /// Error type for tmux operations.
 #[derive(Debug)]
 pub enum TmuxError {
@@ -504,6 +507,166 @@ pub fn create_agent_window(session_name: &str) -> TmuxResult<String> {
     // Failed to generate unique name after 10 attempts
     Err(TmuxError::WindowCreationFailed(
         "failed to generate unique window name after 10 attempts".to_string(),
+    ))
+}
+
+/// Lists windows in a session matching a pattern.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+/// * `pattern` - A substring pattern to match window names against
+///
+/// # Returns
+/// - `Ok(Vec<String>)` containing window names that match the pattern
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::SessionCheckFailed)` if listing fails
+pub fn list_windows_by_pattern(session_name: &str, pattern: &str) -> TmuxResult<Vec<String>> {
+    let all_windows = list_windows(session_name)?;
+    let matching: Vec<String> = all_windows
+        .into_iter()
+        .filter(|w| w.contains(pattern))
+        .collect();
+    Ok(matching)
+}
+
+/// Gets the pane specification for a window.
+///
+/// Returns the full pane spec in the format "session:window.0"
+/// (assuming pane 0, which is the default for new windows).
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+/// * `window_name` - The name of the window
+///
+/// # Returns
+/// - `Ok(String)` containing the pane specification
+pub fn get_pane_spec(session_name: &str, window_name: &str) -> String {
+    format!("{}:{}.0", session_name, window_name)
+}
+
+/// Kills a window in a session.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+/// * `window_name` - The name of the window to kill
+///
+/// # Returns
+/// - `Ok(())` if the window was killed successfully
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::CommandExecutionFailed)` if killing fails
+pub fn kill_window(session_name: &str, window_name: &str) -> TmuxResult<()> {
+    if !is_tmux_available() {
+        return Err(TmuxError::TmuxNotAvailable);
+    }
+
+    let target = format!("{}:{}", session_name, window_name);
+    let output = Command::new("tmux")
+        .args(["kill-window", "-t", &target])
+        .output();
+
+    match output {
+        Ok(output) => {
+            // Exit code 0 means success, but window might not exist
+            // We treat "window not found" as success (idempotent)
+            if output.status.success() {
+                return Ok(());
+            }
+
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // If window doesn't exist, that's fine - it's already gone
+            if stderr.contains("can't find window") || stderr.contains("no such window") {
+                return Ok(());
+            }
+
+            Err(TmuxError::CommandExecutionFailed(stderr.to_string()))
+        }
+        Err(e) => Err(TmuxError::CommandExecutionFailed(e.to_string())),
+    }
+}
+
+/// Captures the content of a pane.
+///
+/// Returns the visible text content of the pane.
+///
+/// # Arguments
+/// * `pane_spec` - The pane specification (e.g., "otto:ralph-xxx.0")
+///
+/// # Returns
+/// - `Ok(String)` containing the pane content
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::CommandExecutionFailed)` if capture fails
+pub fn capture_pane(pane_spec: &str) -> TmuxResult<String> {
+    if !is_tmux_available() {
+        return Err(TmuxError::TmuxNotAvailable);
+    }
+
+    // Capture last 1000 lines of the pane
+    let output = Command::new("tmux")
+        .args(["capture-pane", "-t", pane_spec, "-p", "-S", "-1000"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let content = String::from_utf8_lossy(&output.stdout).to_string();
+            Ok(content)
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // If pane doesn't exist, return empty string (graceful degradation)
+            if stderr.contains("can't find pane") || stderr.contains("no such pane") {
+                return Ok(String::new());
+            }
+            Err(TmuxError::CommandExecutionFailed(stderr.to_string()))
+        }
+        Err(e) => Err(TmuxError::CommandExecutionFailed(e.to_string())),
+    }
+}
+
+/// Attaches to a tmux window.
+///
+/// This function replaces the current process with tmux attach-session,
+/// effectively transferring control to tmux.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+/// * `window_name` - The name of the window to attach to
+///
+/// # Returns
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::CommandExecutionFailed)` if attach fails
+///
+/// # Note
+/// This function uses `std::process::Command::exec()` which replaces
+/// the current process. It never returns on success.
+///
+/// # Platform Support
+/// This function is only available on Unix platforms where we can
+/// replace the current process with exec.
+#[cfg(unix)]
+pub fn attach_to_window(session_name: &str, window_name: &str) -> TmuxResult<()> {
+    if !is_tmux_available() {
+        return Err(TmuxError::TmuxNotAvailable);
+    }
+
+    let target = format!("{}:{}", session_name, window_name);
+
+    // Use exec to replace the otto process with tmux
+    // This never returns on success
+    let error = std::process::Command::new("tmux")
+        .args(["attach-session", "-t", &target])
+        .exec();
+
+    // If exec returns, it means an error occurred
+    Err(TmuxError::CommandExecutionFailed(error.to_string()))
+}
+
+/// Attaches to a tmux window (non-Unix version).
+///
+/// On non-Unix platforms, this function is not available.
+#[cfg(not(unix))]
+pub fn attach_to_window(session_name: &str, window_name: &str) -> TmuxResult<()> {
+    Err(TmuxError::CommandExecutionFailed(
+        "attach is only supported on Unix platforms".to_string(),
     ))
 }
 

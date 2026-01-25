@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use otto_agent_claude::AbortCallback;
 use otto_beads::{has_ready_tasks, BeadsError};
-use otto_core::{color::print_error, color::print_warning, launch_agent_default, AgentError};
+use otto_core::{color::print_error, color::print_warning, launch_agent_default, start_stuck_window_monitor, AgentError};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 /// Global shutdown flag, set by signal handlers
@@ -32,6 +32,19 @@ enum Commands {
     /// Launches otto in a tmux window named 'otto', running in watch mode.
     /// This is the recommended way to run otto persistently.
     Start,
+
+    /// Attach to a tmux window
+    ///
+    /// Connects to a tmux window in the otto session. With no arguments,
+    /// attaches to the 'otto' window. With an argument, attaches to the
+    /// specified window.
+    Attach {
+        /// Window name to attach to (optional)
+        ///
+        /// Can be a short name like "ralph-crimson" or a full spec like "otto:ralph-crimson".
+        /// If not provided, attaches to the 'otto' window.
+        window: Option<String>,
+    },
 
     /// Run the agent loop (default behavior)
     ///
@@ -156,6 +169,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Commands::Attach { window }) => {
+            if let Err(e) = attach_to_window(window) {
+                print_error(&format!("attaching to window: {}", e));
+                std::process::exit(1);
+            }
+        }
         Some(Commands::Ralph { watch, prompt_file }) => {
             // Convert the prompt_file Option<String> to Option<&str>
             let prompt_file = prompt_file.as_deref();
@@ -183,6 +202,7 @@ fn main() {
             println!("Usage: otto <COMMAND>\n");
             println!("Commands:");
             println!("  start   Start otto in tmux (runs in background)");
+            println!("  attach  Attach to a tmux window");
             println!("  ralph   Run the agent loop (default behavior)");
             println!("  claude  Manage Claude Code integration");
             println!("\nFlags:");
@@ -190,6 +210,8 @@ fn main() {
             println!("  -V, --version  Print version");
             println!("\nExamples:");
             println!("  otto start              Start otto in tmux");
+            println!("  otto attach             Attach to 'otto' window");
+            println!("  otto attach ralph-willow Attach to specific window");
             println!("  otto ralph              Run in single-pass mode");
             println!("  otto ralph --watch      Run in watch mode (infinite loop)");
             println!("  otto ralph -p promp.txt Use custom prompt file");
@@ -232,6 +254,85 @@ fn start_otto() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!("Attach with: tmux attach-session -t {}:{}", OTTO_SESSION_NAME, OTTO_WINDOW_NAME);
 
+    Ok(())
+}
+
+/// Attach to a tmux window.
+///
+/// This function:
+/// 1. Parses the window argument to extract session and window name
+/// 2. Checks if the window exists
+/// 3. Attaches to the window using tmux attach-session (replaces otto process)
+///
+/// # Arguments
+/// * `window` - Optional window specification. Can be:
+///   - None: attaches to 'otto' window
+///   - "ralph-xxx": attaches to 'otto:ralph-xxx' window (short form)
+///   - "otto:ralph-xxx": attaches to 'otto:ralph-xxx' window (full spec)
+fn attach_to_window(window: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    use otto_tmux::{attach_to_window as tmux_attach, list_windows, session_exists, OTTO_SESSION_NAME};
+
+    const DEFAULT_WINDOW_NAME: &str = "otto";
+
+    // Parse the window argument
+    let (session, window_name) = match window {
+        None => (OTTO_SESSION_NAME.to_string(), DEFAULT_WINDOW_NAME.to_string()),
+        Some(w) => {
+            if w.contains(':') {
+                // Full spec: "session:window"
+                let parts: Vec<&str> = w.split(':').collect();
+                if parts.len() == 2 {
+                    (parts[0].to_string(), parts[1].to_string())
+                } else {
+                    return Err(format!("Invalid window specification: {}", w).into());
+                }
+            } else {
+                // Short form: just window name, use otto session
+                (OTTO_SESSION_NAME.to_string(), w)
+            }
+        }
+    };
+
+    // Check if session exists
+    match session_exists(&session) {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(format!(
+                "Session '{}' does not exist. Start otto with 'otto start'",
+                session
+            )
+            .into());
+        }
+        Err(e) => {
+            return Err(format!("Failed to check session: {}", e).into());
+        }
+    }
+
+    // Check if window exists
+    match list_windows(&session) {
+        Ok(windows) => {
+            if !windows.contains(&window_name) {
+                print_error(&format!("Window '{}' does not exist in session '{}'", window_name, session));
+                println!("\nAvailable windows:");
+                for w in windows {
+                    println!("  - {}", w);
+                }
+                println!("\nUsage:");
+                println!("  otto attach              Attach to 'otto' window");
+                println!("  otto attach <window>     Attach to specific window (e.g., 'ralph-willow')");
+                println!("  otto attach otto:<win>   Attach with full spec");
+                return Err("Window not found".into());
+            }
+        }
+        Err(e) => {
+            return Err(format!("Failed to list windows: {}", e).into());
+        }
+    }
+
+    // Attach to the window (this replaces the otto process)
+    tmux_attach(&session, &window_name)?;
+
+    // This line is never reached because exec replaces the process
     Ok(())
 }
 
@@ -293,6 +394,9 @@ fn run_single_pass(prompt_file: Option<&str>) {
 }
 
 fn run_watch_loop(prompt_file: Option<&str>) {
+    // Start the stuck window monitoring thread
+    let _monitor_handle = start_stuck_window_monitor();
+
     loop {
         // Check if shutdown was requested
         if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {

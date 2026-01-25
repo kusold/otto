@@ -6,11 +6,18 @@
 pub mod color;
 
 use crate::color::print_progress;
-use otto_tmux::{create_agent_window, ensure_otto_session, send_command_to_window, TmuxError};
+use otto_tmux::{
+    capture_pane, create_agent_window, ensure_otto_session, get_pane_pid, get_pane_spec,
+    kill_window, list_windows_by_pattern, send_command_to_window, AGENT_WINDOW_PREFIX,
+    OTTO_SESSION_NAME, TmuxError,
+};
 use otto_agent_claude::{
     build_agent_prompt, get_prompt, is_claude_available, is_claude_process, AbortCallback,
     ClaudeError,
 };
+use std::collections::HashMap;
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 /// Error type for agent operations.
 #[derive(Debug)]
@@ -340,6 +347,171 @@ pub fn wait_for_claude_in_pane_with_progress(
     }
 
     Err(AgentError::AgentTimeout)
+}
+
+/// State tracking for a window in the stuck window monitor.
+struct WindowState {
+    /// Hash of the pane content from the last check
+    last_content_hash: Option<String>,
+    /// Number of consecutive checks with unchanged content
+    unchanged_count: u32,
+}
+
+/// Starts the stuck window monitoring thread.
+///
+/// This spawns a background thread that monitors all 'ralph-*' windows
+/// and closes those where Claude is not running or has produced no output.
+///
+/// # Returns
+/// A `JoinHandle` for the monitoring thread
+///
+/// # Behavior
+/// - Every 5 minutes, checks all ralph-* windows
+/// - Closes windows where Claude process is not running
+/// - Closes windows where content unchanged for 10 minutes (2 checks)
+/// - Logs all closures to ~/.otto/watchdog.log
+pub fn start_stuck_window_monitor() -> JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut window_states: HashMap<String, WindowState> = HashMap::new();
+
+        // Log monitoring start
+        if let Err(e) = log_watchdog("Monitoring started") {
+            eprintln!("Watchdog: failed to log start: {}", e);
+        }
+
+        loop {
+            std::thread::sleep(Duration::from_secs(300)); // 5 minutes
+
+            if let Err(e) = cleanup_stuck_windows(&mut window_states) {
+                eprintln!("Watchdog error: {}", e);
+            }
+        }
+    })
+}
+
+/// Cleans up stuck windows by checking process and content.
+///
+/// This is called periodically by the monitoring thread.
+///
+/// # Arguments
+/// * `states` - Mutable hashmap tracking window states across checks
+///
+/// # Returns
+/// - `Ok(())` if cleanup completed (even if no windows were closed)
+/// - `Err(AgentError)` if there was a fatal error
+fn cleanup_stuck_windows(states: &mut HashMap<String, WindowState>) -> AgentResult<()> {
+    // List all ralph-* windows
+    let ralph_windows = match list_windows_by_pattern(OTTO_SESSION_NAME, AGENT_WINDOW_PREFIX) {
+        Ok(windows) => windows,
+        Err(TmuxError::TmuxNotAvailable) => {
+            // Tmux not available, just skip this check
+            return Ok(());
+        }
+        Err(e) => return Err(AgentError::TmuxError(e)),
+    };
+
+    for window_name in ralph_windows {
+        let pane_spec = get_pane_spec(OTTO_SESSION_NAME, &window_name);
+
+        // Check 1: Is Claude process running?
+        let claude_running = match get_pane_pid(&pane_spec) {
+            Ok(Some(pid)) => is_claude_process(pid),
+            Ok(None) => false, // No process running
+            Err(TmuxError::TmuxNotAvailable) => {
+                // Tmux not available, skip
+                continue;
+            }
+            Err(_) => false, // Error querying, assume not running
+        };
+
+        if !claude_running {
+            // Process died, close the window
+            log_watchdog(&format!("Closed window {}: claude process not running", window_name))
+                .ok();
+            kill_window(OTTO_SESSION_NAME, &window_name).ok();
+            states.remove(&window_name);
+            continue;
+        }
+
+        // Check 2: Is content changing?
+        match capture_pane(&pane_spec) {
+            Ok(content) => {
+                // Compute hash of content
+                use std::hash::{Hash, Hasher};
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                content.hash(&mut hasher);
+                let content_hash = format!("{:x}", hasher.finish());
+
+                // Get or create state for this window
+                let state = states.entry(window_name.clone()).or_insert(WindowState {
+                    last_content_hash: None,
+                    unchanged_count: 0,
+                });
+
+                // Check if content changed
+                if Some(&content_hash) == state.last_content_hash.as_ref() {
+                    // Content unchanged, increment counter
+                    state.unchanged_count += 1;
+
+                    // If unchanged for 2 checks (10 minutes), close window
+                    if state.unchanged_count >= 2 {
+                        log_watchdog(&format!(
+                            "Closed window {}: no output for 10 minutes",
+                            window_name
+                        ))
+                        .ok();
+                        kill_window(OTTO_SESSION_NAME, &window_name).ok();
+                        states.remove(&window_name);
+                    }
+                } else {
+                    // Content changed, reset counter
+                    state.last_content_hash = Some(content_hash);
+                    state.unchanged_count = 0;
+                }
+            }
+            Err(_) => {
+                // Failed to capture pane, skip this check
+                // (pane might have been closed)
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Logs a watchdog message to the log file.
+///
+/// Logs to ~/.otto/watchdog.log with timestamp.
+///
+/// # Arguments
+/// * `message` - The message to log
+fn log_watchdog(message: &str) -> std::io::Result<()> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+
+    // Get home directory
+    let home = std::env::var("HOME")
+        .map_err(|_| std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "HOME directory not found"
+        ))?;
+
+    // Create .otto directory if it doesn't exist
+    let otto_dir = std::path::PathBuf::from(home).join(".otto");
+    std::fs::create_dir_all(&otto_dir)?;
+
+    // Open log file in append mode
+    let log_path = otto_dir.join("watchdog.log");
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)?;
+
+    // Write timestamped message
+    let timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC");
+    writeln!(file, "[{}] {}", timestamp, message)?;
+
+    Ok(())
 }
 
 #[cfg(test)]

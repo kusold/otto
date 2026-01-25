@@ -7,3 +7,4 @@ edition.workspace = true
 otto-tmux = { path = "../otto-tmux" }
 otto-agent-claude = { path = "../otto-agent-claude" }
 termcolor = "1.4"
+chrono = "0.4"
