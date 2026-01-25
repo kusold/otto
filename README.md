@@ -182,6 +182,43 @@ Otto is intentionally simple:
 - **No plugin system**: Only Claude Code is supported
 - **Claude Code only**: No support for other AI agents currently
 
+## Contributing
+
+Contributions are welcome! Here are some ways you can contribute:
+
+### Reporting Issues
+
+Found a bug? Have a feature request? Please file an issue in the project's issue tracker.
+
+### Submitting Pull Requests
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+### Code Style
+
+- Follow Rust standard naming conventions
+- Run `cargo fmt` before committing
+- Run `cargo clippy` to catch common issues
+- Ensure all tests pass (`cargo test`)
+
+### Development Setup
+
+```bash
+# Clone the repository
+git clone <repository-url>
+cd otto
+
+# Enter the development shell (Nix)
+nix develop
+
+# Or install dependencies manually
+cargo build
+```
+
 ## Development
 
 ### Project Structure
