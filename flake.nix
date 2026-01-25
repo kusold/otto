@@ -20,7 +20,7 @@
     # Overlay that can be used in other NixOS configurations
     ottoOverlay = final: prev: {
       otto = final.callPackage ./nix/package.nix {
-        inherit cargo2nix;
+        inherit cargo2nix nixpkgs;
         inherit (final.stdenv) system;
       };
     };
