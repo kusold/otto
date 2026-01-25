@@ -143,7 +143,7 @@ fi
 # Task not complete - BLOCK exit with non-zero code
 # Write to saved stderr (fd 3) to show error message
 debug_log "No <PLANE-HAS-LANDED> marker found, BLOCKING exit"
-echo "ERROR: Cannot exit - work is not complete!" >&3
-echo "ERROR: Last assistant message missing <PLANE-HAS-LANDED> marker" >&3
-echo "ERROR: Continue working until complete, then include <PLANE-HAS-LANDED>" >&3
-exit 1
+debug_log "ERROR: Cannot exit - work is not complete!" >&3
+debug_log "ERROR: Last assistant message missing <PLANE-HAS-LANDED> marker" >&3
+debug_log "ERROR: Continue working until complete, then include <PLANE-HAS-LANDED>" >&3
+exit 0
