@@ -60,7 +60,8 @@ enum Commands {
 
         /// Path to a custom prompt file for Claude Code agents
         ///
-        /// If provided, reads the prompt from this file. Otherwise, uses the default
+        /// If provided, reads the prompt from this file. Otherwise, auto-detects
+        /// PROMPT_RALPH.md from the repo root, or falls back to the default
         /// OTTO_AGENT_PROMPT.
         #[arg(long, short = 'p')]
         prompt_file: Option<String>,
@@ -83,6 +84,39 @@ enum ClaudeCommands {
     /// Claude Code settings to use the hook. The hook ensures Claude only exits
     /// after outputting the <PLANE-HAS-LANDED> marker.
     Install,
+}
+
+/// Detects if PROMPT_RALPH.md exists in the repository root.
+///
+/// Returns Some("PROMPT_RALPH.md") if the file exists, None otherwise.
+/// This function searches upward from the current directory to find the
+/// repository root (indicated by a .beads directory).
+fn detect_ralph_prompt() -> Option<&'static str> {
+    const PROMPT_FILE: &str = "PROMPT_RALPH.md";
+    const BEADS_DIR: &str = ".beads";
+
+    // Start from current directory and search upward
+    let mut current_path = std::env::current_dir().ok()?;
+
+    loop {
+        // Check if .beads directory exists (indicates repo root)
+        let beads_path = current_path.join(BEADS_DIR);
+        if beads_path.is_dir() {
+            // Found repo root, check for PROMPT_RALPH.md
+            let prompt_path = current_path.join(PROMPT_FILE);
+            if prompt_path.is_file() {
+                return Some(PROMPT_FILE);
+            }
+            // Found repo root but no prompt file, stop searching
+            return None;
+        }
+
+        // Move to parent directory
+        if !current_path.pop() {
+            // Reached filesystem root, not in a repo
+            return None;
+        }
+    }
 }
 
 /// Formats a duration into a human-readable string.
@@ -176,8 +210,12 @@ fn main() {
             }
         }
         Some(Commands::Ralph { watch, prompt_file }) => {
-            // Convert the prompt_file Option<String> to Option<&str>
-            let prompt_file = prompt_file.as_deref();
+            // Auto-detect PROMPT_RALPH.md if no prompt file specified
+            let prompt_file = if prompt_file.is_none() {
+                detect_ralph_prompt()
+            } else {
+                prompt_file.as_deref()
+            };
 
             if watch {
                 println!("Otto running in watch mode (infinite loop)");
@@ -214,7 +252,8 @@ fn main() {
             println!("  otto attach ralph-willow Attach to specific window");
             println!("  otto ralph              Run in single-pass mode");
             println!("  otto ralph --watch      Run in watch mode (infinite loop)");
-            println!("  otto ralph -p promp.txt Use custom prompt file");
+            println!("  otto ralph -p FILE      Use custom prompt file");
+            println!("                         (auto-detects PROMPT_RALPH.md if found)");
             println!("  otto claude install     Install Claude Code stop hook");
         }
     }

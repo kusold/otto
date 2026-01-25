@@ -35,7 +35,9 @@ Enable autonomous coding by running a simple loop where AI agents independently 
 
 ### 5. Custom Prompt Support
 - **`--prompt-file` / `-p`**: Specify a custom prompt file for Claude Code agents
-- If not provided, uses the default `OTTO_AGENT_PROMPT` from otto-core
+- If not provided, auto-detects `PROMPT_RALPH.md` from repository root (indicated by `.beads` directory)
+- Falls back to the default `OTTO_AGENT_PROMPT` from otto-core if no custom prompt found
+- Explicit `-p` flag always takes precedence over auto-detection
 - Reads prompt content from file and passes to Claude Code
 
 ### 6. Claude Code Hook Installation
@@ -119,12 +121,16 @@ When disabled (default):
 
 ##### `--prompt-file` / `-p`
 **Type**: String path
-**Default**: None (uses OTTO_AGENT_PROMPT from otto-core)
+**Default**: None (auto-detects PROMPT_RALPH.md, or uses OTTO_AGENT_PROMPT from otto-core)
 **Description**: Path to a custom prompt file for Claude Code agents
 
 **Behavior**:
-- Reads file contents
-- Passes contents to Claude Code as the agent prompt
+- If provided: Reads file contents and passes to Claude Code as the agent prompt
+- If not provided: Auto-detects `PROMPT_RALPH.md` in repository root
+  - Searches upward from current directory for `.beads` directory (repo root)
+  - If `PROMPT_RALPH.md` exists at repo root, uses it automatically
+  - If not found, falls back to `OTTO_AGENT_PROMPT` from otto-core
+- Explicit `-p` flag always takes precedence over auto-detection
 - Useful for testing different prompts or specialized workflows
 
 #### `claude install`
@@ -168,8 +174,11 @@ otto ralph
 # Run in watch mode (continuous operation)
 otto ralph --watch
 
-# Use custom prompt file
+# Use custom prompt file (explicitly specified)
 otto ralph -p my-custom-prompt.txt
+
+# Use PROMPT_RALPH.md (auto-detected if exists)
+otto ralph
 
 # Watch mode with custom prompt
 otto ralph --watch --prompt-file special-prompt.txt
@@ -205,7 +214,8 @@ Examples:
   otto attach ralph-willow Attach to specific window
   otto ralph              Run in single-pass mode
   otto ralph --watch      Run in watch mode (infinite loop)
-  otto ralph -p promp.txt Use custom prompt file
+  otto ralph -p FILE      Use custom prompt file
+                         (auto-detects PROMPT_RALPH.md if found)
   otto claude install     Install Claude Code stop hook
 ```
 
@@ -620,8 +630,10 @@ No runtime configuration files. Behavior is fixed at compile time:
 ### Runtime Configuration
 
 **Custom Prompt Files**:
-- Specify via `--prompt-file` / `-p` flag
-- Overrides default `OTTO_AGENT_PROMPT`
+- Auto-detection: If `PROMPT_RALPH.md` exists at repository root, used automatically
+- Explicit override: Specify via `--prompt-file` / `-p` flag
+- Explicit flag always takes precedence over auto-detection
+- Fallback: `OTTO_AGENT_PROMPT` from otto-core if no custom prompt found
 - File content read and passed directly to Claude Code
 
 ### Claude Code Configuration
