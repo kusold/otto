@@ -2,57 +2,107 @@
 
 ## Overview
 
-Otto is a command-line tool that autonomously executes AI coding agents in a continuous loop. It integrates with the beads issue tracking system and Claude Code CLI to automate task completion. The primary purpose of Otto is to enable autonomous AFK (away from keyboard) coding by continuously running AI agents against a task queue without complex orchestration.
+Otto is a command-line tool that autonomously executes AI coding agents in a continuous loop. It integrates with the beads issue tracking system and Claude Code CLI to automate task completion. The primary purpose of Otto is to enable autonomous AFK (away from keyboard) coding by continuously running AI agents against a task queue with integrated tmux session management.
 
 ### Vision
 
-Enable autonomous coding by running a simple loop where AI agents independently pick tasks from a queue, work on them, and exit. The system prioritizes simplicity over complexity, with no configuration files or state management.
+Enable autonomous coding by running a simple loop where AI agents independently pick tasks from a queue, work on them, and exit. The system prioritizes simplicity over complexity, with tmux integration for persistent sessions and observability.
 
 ## Core Features
 
-### 1. Single-Pass Mode (Default)
-- Runs agents until no ready beads (tasks) remain
-- Exits automatically when the task queue is empty
-- Suitable for one-time batch processing of tasks
+### 1. Subcommand-Based CLI
+- Uses subcommands for different operations (not simple flags)
+- Commands: `start`, `attach`, `ralph`, `claude`
+- Each command serves a distinct purpose in the workflow
 
-### 2. Watch Mode (`--watch` or `-w`)
-- Runs indefinitely in a continuous loop
-- When no ready tasks exist, waits 10 seconds and checks again
-- Designed for long-running autonomous operation
-- Continues until manually stopped with Ctrl+C
-
-### 3. Tmux Integration
-- Spawns all Claude Code agents within a reusable tmux session named "otto"
-- Automatically creates the session if it doesn't exist
+### 2. Tmux Session Integration
+- **`otto start`**: Spawns otto in a tmux session named "otto" in a window named "otto"
+- Automatically creates the session and window if they don't exist
+- Reuses existing session/window if already running
 - Allows users to attach and observe agent work in real-time
-- Maintains session state across multiple agent launches
 
-### 4. Graceful Shutdown
+### 3. Window Attachment
+- **`otto attach [window]`**: Attach to any window in the otto tmux session
+- Supports short form: `otto attach ralph-willow` (assumes otto session)
+- Supports full spec: `otto attach otto:ralph-willow`
+- Defaults to 'otto' window if no argument provided
+- Lists available windows if requested window doesn't exist
+
+### 4. Agent Loop (Ralph Command)
+- **`otto ralph`**: Run the agent loop in single-pass mode (exits when no tasks)
+- **`otto ralph --watch`**: Run in watch mode (continuous operation)
+- **`otto ralph -p custom.txt`**: Use custom prompt file instead of default
+
+### 5. Custom Prompt Support
+- **`--prompt-file` / `-p`**: Specify a custom prompt file for Claude Code agents
+- If not provided, uses the default `OTTO_AGENT_PROMPT` from otto-core
+- Reads prompt content from file and passes to Claude Code
+
+### 6. Claude Code Hook Installation
+- **`otto claude install`**: Installs the otto stop hook for Claude Code
+- Creates `~/.claude/hooks/otto-stop-hook.sh` script
+- Configures `~/.claude/settings.json` to use the hook
+- Hook ensures Claude only exits after outputting `<PLANE-HAS-LANDED>` marker
+
+### 7. Graceful Shutdown
 - Handles SIGINT (Ctrl+C) and SIGTERM signals
-- Waits for the current agent to finish before exiting
-- Prevents task interruption during shutdown
-- Provides clear user feedback during shutdown process
+- **First Ctrl+C**: Sets shutdown flag, terminates agent, waits gracefully
+- **Second Ctrl+C**: Force exits immediately (exit code 130)
+- SIGTERM always triggers graceful shutdown (no force kill)
 
-### 5. Beads Integration
-- Checks for ready-to-work tasks using `bd ready` command
-- Identifies tasks with no blockers (dependencies satisfied)
-- Works exclusively with the beads git-based issue tracking system
-- Requires beads to be initialized in the project directory
+### 8. Stuck Window Monitoring
+- Watch mode includes background monitoring for stuck tmux windows
+- Automatically detects and handles non-responsive agent windows
+- Started via `start_stuck_window_monitor()` in watch mode
 
-### 6. Fixed Agent Prompting
-- All agents receive the same fixed prompt: "Run bd ready, choose a bead, begin work on only that bead. Exit when done."
-- Ensures each agent focuses on a single task
-- Maintains clear boundaries between iterations
-- Prevents agents from working on multiple tasks simultaneously
+### 9. Enhanced Agent Reporting
+- Agents return duration and window name on completion
+- Output shows: "Agent finished in {window_name} (duration: {formatted_duration})"
+- Duration formatted as "1h 5m 30s" or "45s" or "1m 23s"
 
 ## Command-Line Interface
 
 ### Binary Name
 `otto`
 
-### Arguments
+### Commands
 
-#### `--watch` / `-w`
+#### `start`
+**Purpose**: Start otto in tmux (runs in background)
+
+**Behavior**:
+1. Ensures tmux server is running
+2. Ensures 'otto' tmux session exists (creates if needed)
+3. Creates 'otto' window if it doesn't exist
+4. Runs `otto ralph --watch` in that window
+5. Prints confirmation with attachment instructions
+
+**Output**:
+```
+Started otto in new window: otto
+Attach with: tmux attach-session -t otto:otto
+```
+
+#### `attach [window]`
+**Purpose**: Attach to a tmux window
+
+**Arguments**:
+- `window` (optional): Window name or session:window spec
+  - None: attaches to 'otto' window
+  - "ralph-willow": attaches to 'otto:ralph-willow' (short form)
+  - "otto:ralph-willow": attaches to 'otto:ralph-willow' (full spec)
+
+**Error Handling**:
+- If session doesn't exist: error with instructions to run `otto start`
+- If window doesn't exist: lists available windows and shows usage
+- Replaces otto process with tmux attach (exec)
+
+#### `ralph`
+**Purpose**: Run the agent loop (main execution mode)
+
+**Subcommand Arguments**:
+
+##### `--watch` / `-w`
 **Type**: Boolean flag
 **Default**: false
 **Description**: Run in watch mode (loop forever, checking for ready tasks)
@@ -61,27 +111,103 @@ When enabled:
 - Otto runs in an infinite loop
 - When no ready tasks exist, waits 10 seconds before checking again
 - Continues until stopped with Ctrl+C
+- Starts stuck window monitoring thread
 
 When disabled (default):
 - Otto exits when no ready tasks are found
 - Suitable for single-pass batch processing
 
+##### `--prompt-file` / `-p`
+**Type**: String path
+**Default**: None (uses OTTO_AGENT_PROMPT from otto-core)
+**Description**: Path to a custom prompt file for Claude Code agents
+
+**Behavior**:
+- Reads file contents
+- Passes contents to Claude Code as the agent prompt
+- Useful for testing different prompts or specialized workflows
+
+#### `claude install`
+**Purpose**: Install the otto stop hook for Claude Code
+
+**Behavior**:
+1. Creates `~/.claude/hooks/` directory if needed
+2. Writes `otto-stop-hook.sh` script to hooks directory
+3. Makes script executable (chmod 755)
+4. Creates or updates `~/.claude/settings.json`
+5. Adds stop hook configuration if not already present
+6. Hook checks for `<PLANE-HAS-LANDED>` marker before allowing Claude to exit
+
+**Output**:
+```
+ Created stop hook at: /home/user/.claude/hooks/otto-stop-hook.sh
+ Created settings at: /home/user/.claude/settings.json
+
+ Otto stop hook installed successfully!
+   Claude Code will now require the <PLANE-HAS-LANDED> marker to exit.
+```
+
 ### Usage Examples
 
 ```bash
-# Single-pass mode (exit when no tasks remain)
+# Start otto in tmux (recommended for persistent operation)
+otto start
+
+# Attach to the main otto window
+otto attach
+
+# Attach to a specific window (short form)
+otto attach ralph-willow
+
+# Attach to a specific window (full spec)
+otto attach otto:ralph-willow
+
+# Run in single-pass mode (exits when no tasks)
+otto ralph
+
+# Run in watch mode (continuous operation)
+otto ralph --watch
+
+# Use custom prompt file
+otto ralph -p my-custom-prompt.txt
+
+# Watch mode with custom prompt
+otto ralph --watch --prompt-file special-prompt.txt
+
+# Install Claude Code integration
+otto claude install
+
+# Run with no subcommand (shows help)
 otto
-
-# Watch mode (continuous operation)
-otto --watch
-
-# Watch mode with short flag
-otto -w
 ```
 
 ### User Output
 
-Otto provides console output at key points:
+**No subcommand:**
+```
+Otto - Autonomous agent runner for beads tasks
+
+Usage: otto <COMMAND>
+
+Commands:
+  start   Start otto in tmux (runs in background)
+  attach  Attach to a tmux window
+  ralph   Run the agent loop (default behavior)
+  claude  Manage Claude Code integration
+
+Flags:
+  -h, --help     Print help
+  -V, --version  Print version
+
+Examples:
+  otto start              Start otto in tmux
+  otto attach             Attach to 'otto' window
+  otto attach ralph-willow Attach to specific window
+  otto ralph              Run in single-pass mode
+  otto ralph --watch      Run in watch mode (infinite loop)
+  otto ralph -p promp.txt Use custom prompt file
+  otto claude install     Install Claude Code stop hook
+```
 
 **Watch mode startup:**
 ```
@@ -97,7 +223,7 @@ Otto running in single-pass mode
 **Agent execution:**
 ```
 Starting agent...
-Agent finished
+Agent finished in ralph-crimson (duration: 2m 15s)
 ```
 
 **No tasks available:**
@@ -106,10 +232,17 @@ No ready beads, exiting          # Single-pass mode
 No ready beads, waiting...        # Watch mode
 ```
 
-**Shutdown:**
+**Shutdown (first Ctrl+C):**
 ```
-^CShutdown signal received, waiting for agent to finish...
+^CShutdown signal received, terminating agent...
+Agent will be killed gracefully. Press Ctrl+C again to force exit.
 Shutting down gracefully
+```
+
+**Shutdown (second Ctrl+C):**
+```
+^CForce exit requested
+[process exits with code 130]
 ```
 
 **Error messages:**
@@ -117,6 +250,8 @@ Shutting down gracefully
 Error: beads not initialized (no .beads directory)
 Error launching agent: <error details>
 Warning: Agent timed out
+Error: Session 'otto' does not exist. Start otto with 'otto start'
+Error: Window 'ralph-xyz' does not exist in session 'otto'
 ```
 
 ## Dependencies
@@ -127,8 +262,12 @@ Warning: Agent timed out
 **Path**: `../otto-core`
 **Purpose**: Provides core agent launching functionality
 **Key Functions**:
-- `launch_agent_default()`: Launches Claude Code agent with default timeout
-- `launch_agent(timeout_secs: Option<u64>)`: Launches agent with custom timeout
+- `launch_agent_default(prompt_file: Option<&str>, abort_callback: Option<AbortCallback>) -> Result<(Duration, String), AgentError>`
+  - Launches Claude Code agent with default timeout
+  - Returns duration and window name on success
+- `start_stuck_window_monitor() -> JoinHandle<()>`: Starts background stuck window monitoring (watch mode)
+- `color::print_error(msg: &str)`: Prints error message to stderr
+- `color::print_warning(msg: &str)`: Prints warning message to stderr
 
 **Key Types**:
 - `AgentError`: Error type for agent operations
@@ -138,8 +277,14 @@ Warning: Agent timed out
   - `AgentTimeout`: Agent did not exit in time
 
 **Constants**:
-- `OTTO_AGENT_PROMPT`: Fixed prompt sent to all agents
+- `OTTO_AGENT_PROMPT`: Fixed prompt sent to all agents (when no custom prompt provided)
 - `DEFAULT_AGENT_TIMEOUT_SECS`: 300 seconds (5 minutes)
+
+#### `otto-agent-claude`
+**Path**: `../otto-agent-claude`
+**Purpose**: Provides Claude Code CLI integration and abort callback functionality
+**Key Types**:
+- `AbortCallback`: `fn() -> bool` - Callback function that returns true if agent should abort
 
 #### `otto-beads`
 **Path**: `../otto-beads`
@@ -153,12 +298,18 @@ Warning: Agent timed out
   - `NotInitialized`: beads not initialized (no .beads directory)
   - `ExecutionFailed(String)`: Command execution failed
 
-#### `otto-tmux` (transitive dependency via otto-core)
+#### `otto-tmux`
 **Path**: `../otto-tmux`
 **Purpose**: Provides tmux session management
 **Key Functions**:
-- `ensure_otto_session()`: Ensures "otto" tmux session exists
-- `send_otto_command(command: &str)`: Executes command in otto session
+- `ensure_session(session_name: &str)`: Ensures tmux session exists
+- `create_named_window(session: &str, window: &str)`: Creates a new tmux window
+- `send_command_to_window(session: &str, window: &str, command: &str)`: Executes command in tmux window
+- `window_exists(session: &str, window: &str) -> Result<bool, TmuxError>`: Checks if window exists
+- `list_windows(session: &str) -> Result<Vec<String>, TmuxError>`: Lists all windows in session
+- `session_exists(session: &str) -> Result<bool, TmuxError>`: Checks if session exists
+- `attach_to_window(session: &str, window: &str)`: Attaches to window (replaces process via exec)
+- `OTTO_SESSION_NAME`: "otto" constant
 
 **Key Types**:
 - `TmuxError`: Error type for tmux operations
@@ -167,15 +318,12 @@ Warning: Agent timed out
   - `CommandExecutionFailed(String)`: Command execution failed
   - `SessionCheckFailed(String)`: Session check failed
 
-**Constants**:
-- `OTTO_SESSION_NAME`: "otto"
-
 ### External Dependencies
 
 #### `clap` (version 4.5)
 **Features**: derive
 **Purpose**: Command-line argument parsing
-**Usage**: Derive `Parser` trait for `Args` struct
+**Usage**: Derive `Parser` and `Subcommand` traits for `Args` and `Commands` structs
 
 #### `signal-hook` (version 0.3)
 **Features**: iterator
@@ -184,19 +332,37 @@ Warning: Agent timed out
 - Register handlers for SIGINT and SIGTERM
 - Signals iterator for background signal handling
 
+#### `serde_json`
+**Purpose**: JSON parsing and generation for Claude Code settings
+**Usage**: Read and modify `~/.claude/settings.json` when installing hooks
+
 ## Key Data Structures and Types
 
 ### `Args` Structure
 ```rust
 #[derive(Parser, Debug)]
+#[command(name = "otto")]
+#[command(version, about, long_about = None)]
+#[command(author = "Mike Kusold")]
 struct Args {
-    #[arg(long, short = 'w')]
-    watch: bool,
+    #[command(subcommand)]
+    command: Option<Commands>,
 }
 ```
-**Purpose**: Holds command-line arguments
+**Purpose**: Holds top-level command-line arguments
 **Fields**:
-- `watch`: Boolean flag for watch mode
+- `command`: Optional subcommand (start, attach, ralph, claude)
+
+### `Commands` Enum
+```rust
+#[derive(Subcommand, Debug)]
+enum Commands {
+    Start,
+    Attach { window: Option<String> },
+    Ralph { watch: bool, prompt_file: Option<String> },
+    Claude { claude_command: ClaudeCommands },
+}
+```
 
 ### `SHUTDOWN_REQUESTED` Global
 ```rust
@@ -206,6 +372,17 @@ static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
 **Type**: `AtomicBool`
 **Access Pattern**: Load/store with `Ordering::SeqCst`
 **Usage**: Signal handlers set to true; main loop checks before each iteration
+
+### `SHUTDOWN_COUNT` Global
+```rust
+static SHUTDOWN_COUNT: AtomicU8 = AtomicU8::new(0);
+```
+**Purpose**: Counts number of shutdown signals received
+**Type**: `AtomicU8`
+**Usage**:
+- 0: No shutdown requested
+- 1: Graceful shutdown (first Ctrl+C)
+- 2+: Force exit (second Ctrl+C)
 
 ### Error Type Wrappers
 
@@ -226,19 +403,25 @@ The main crate uses error types from dependencies:
 #### Initialization Phase
 1. Parse command-line arguments using `clap`
 2. Set up signal handlers for SIGINT and SIGTERM
-3. Fork signal handling to a separate thread (required by signal safety rules)
-4. Display mode-specific startup message
+3. Match on command subcommand:
+   - `start`: Execute `start_otto()`
+   - `attach`: Execute `attach_to_window(window)`
+   - `ralph`: Execute `run_single_pass()` or `run_watch_loop()`
+   - `claude install`: Execute `install_claude_hook()`
+   - None: Print help text
 
 #### Execution Phase
 
-**Single-Pass Mode (`run_single_pass()`)**:
+**Single-Pass Mode (`run_single_pass(prompt_file: Option<&str>)`)**:
 ```
 loop:
     1. Check SHUTDOWN_REQUESTED flag
        - If true: print "Shutting down gracefully" and return
     2. Call has_ready_tasks()
        - If Ok(true): Launch agent
-         - Call launch_agent_default()
+         - Create abort_callback that checks SHUTDOWN_REQUESTED
+         - Call launch_agent_default(prompt_file, Some(abort_callback))
+         - Returns Ok((duration, window_name)): Print formatted message
          - Handle AgentTimeout (warning, continue)
          - Handle other errors (error message, return)
          - Check shutdown flag again
@@ -247,14 +430,17 @@ loop:
        - If Err(other): Print error and return
 ```
 
-**Watch Mode (`run_watch_loop()`)**:
+**Watch Mode (`run_watch_loop(prompt_file: Option<&str>)`)**:
 ```
+1. Start stuck window monitoring thread
 loop:
     1. Check SHUTDOWN_REQUESTED flag
        - If true: print "Shutting down gracefully" and return
     2. Call has_ready_tasks()
        - If Ok(true): Launch agent
-         - Call launch_agent_default()
+         - Create abort_callback that checks SHUTDOWN_REQUESTED
+         - Call launch_agent_default(prompt_file, Some(abort_callback))
+         - Returns Ok((duration, window_name)): Print formatted message
          - Handle AgentTimeout (warning, continue)
          - Handle other errors (error message, continue in watch mode)
          - Check shutdown flag again
@@ -275,30 +461,101 @@ loop:
 1. Creates a `Signals` iterator for SIGINT and SIGTERM
 2. Spawns a dedicated thread for signal handling
 3. Thread blocks on `signals.forever()` iterator
-4. On signal receipt:
-   - Checks if already requested (prevents duplicate messages)
-   - Sets `SHUTDOWN_REQUESTED` to true
-   - Prints shutdown message
+4. On SIGINT (Ctrl+C):
+   - Increment SHUTDOWN_COUNT
+   - If count == 0: Set SHUTDOWN_REQUESTED to true, print shutdown message
+   - If count >= 1: Exit immediately with code 130 (128 + SIGINT)
+5. On SIGTERM:
+   - Check if already requested (prevents duplicate messages)
+   - Set SHUTDOWN_REQUESTED to true
+   - Print shutdown message
 
 **Thread Safety**:
-- Uses `AtomicBool` with `Ordering::SeqCst` for guaranteed visibility
+- Uses `AtomicBool` and `AtomicU8` with `Ordering::SeqCst` for guaranteed visibility
 - No race conditions due to atomic operations
+
+**Behavior Difference**:
+- First Ctrl+C: Graceful shutdown (terminates agent, waits)
+- Second Ctrl+C: Immediate force exit
+- SIGTERM: Always graceful (no force kill option)
+
+### Tmux Integration
+
+#### `start_otto()` Function
+
+**Steps**:
+1. Ensure 'otto' tmux session exists (creates if needed)
+2. Check if 'otto' window exists in session
+3. If window doesn't exist, create it
+4. Send command `otto ralph --watch` to the window
+5. Print confirmation with attachment instructions
+
+**Output Messages**:
+- "Started otto in new window: otto" (if window created)
+- "Started otto in existing window: otto" (if window existed)
+- "Attach with: tmux attach-session -t otto:otto"
+
+#### `attach_to_window(window: Option<String>)` Function
+
+**Steps**:
+1. Parse window argument:
+   - None: Use (OTTO_SESSION_NAME, "otto")
+   - "session:window": Parse as full spec
+   - "window": Use (OTTO_SESSION_NAME, window)
+2. Check if session exists (error with instructions if not)
+3. Check if window exists (list available windows if not)
+4. Attach to window using tmux (exec replaces process)
+
+**Error Handling**:
+- Session doesn't exist: Print error, suggest `otto start`
+- Window doesn't exist: List available windows, show usage
+- Both are fatal errors (return Result::Err)
+
+### Claude Hook Installation
+
+#### `install_claude_hook()` Function
+
+**Steps**:
+1. Get Claude config directory (`~/.claude`)
+2. Create hooks directory (`~/.claude/hooks/`)
+3. Write otto-stop-hook.sh script
+4. Make script executable (chmod 755 on Unix)
+5. Read existing `~/.claude/settings.json` (or create empty object)
+6. Parse settings JSON
+7. Ensure "hooks" object exists
+8. Check if otto stop hook already exists
+9. Add otto stop hook if not present
+10. Write updated settings back to file
+11. Print success messages
+
+**Hook Script Behavior**:
+1. Read hook input from stdin (advanced stop hook API)
+2. Extract transcript path from JSON input
+3. Read last assistant message from transcript (JSONL format)
+4. Parse JSON to extract text content
+5. Check if `<PLANE-HAS-LANDED>` marker is present
+6. If found: Kill Claude Code parent process, allow exit
+7. If not found: Block exit with system message prompting continuation
 
 ### Agent Lifecycle
 
 **Launch Process** (delegated to `otto-core`):
 1. Check if Claude Code CLI is available (`claude --version`)
 2. Ensure "otto" tmux session exists
-3. Construct command: `claude "Run bd ready, choose a bead, begin work on only that bead. Exit when done."`
-4. Send command to tmux session
-5. Poll for completion (check for running `claude` process)
-6. Wait up to 300 seconds (5 minutes) default
-7. Return `Ok(())` on completion, `AgentTimeout` on timeout
+3. Read custom prompt file if provided (or use default)
+4. Create new tmux window with unique name (e.g., "ralph-crimson")
+5. Construct command: `claude "PROMPT"`
+6. Send command to tmux window
+7. Poll for completion (check for running `claude` process)
+8. Check abort callback during polling
+9. Wait up to 300 seconds (5 minutes) default
+10. Return `Ok((duration, window_name))` on completion, `AgentTimeout` on timeout
 
 **Monitoring**:
 - Polls every 2 seconds using `pgrep -f claude`
 - Checks process existence rather than exit codes
 - Timeout is configurable but defaults to 300 seconds
+- Aborts if abort callback returns true
 
 ### Sleep Behavior
 
@@ -319,19 +576,28 @@ for _ in 0..10 {
 }
 ```
 
+### Duration Formatting
+
+**`format_duration(duration: Duration) -> String`**:
+- Converts Duration to human-readable string
+- Examples: "1h 5m 30s", "45s", "1m 23s"
+- Only includes non-zero components
+- Always includes seconds if all other components are zero
+
 ### Error Handling Strategy
 
 **Fatal Errors** (immediate exit):
 - `BeadsError::NotInitialized`: beads not initialized
 - Non-timeout `AgentError` variants in single-pass mode
 - All errors in single-pass mode except `AgentTimeout`
+- Tmux session/window not found errors
 
 **Non-Fatal Errors** (continue operation):
 - `AgentError::AgentTimeout`: Warning message, continue loop
 - Errors in watch mode (except `NotInitialized`): Error message, sleep, continue
 
 **Error Messages**:
-- Printed to stderr using `eprintln!()`
+- Printed to stderr using `print_error()` wrapper
 - Include descriptive context from error types
 - `Display` trait implemented for all error types
 
@@ -351,12 +617,27 @@ No runtime configuration files. Behavior is fixed at compile time:
 - Change session name: Edit `OTTO_SESSION_NAME` in `otto-tmux/src/lib.rs`
 - Change agent prompt: Edit `OTTO_AGENT_PROMPT` in `otto-core/src/lib.rs`
 
-### No Configuration Files
+### Runtime Configuration
 
-Otto intentionally has no configuration file support. All behavior is determined by:
-1. Command-line arguments (`--watch` flag)
+**Custom Prompt Files**:
+- Specify via `--prompt-file` / `-p` flag
+- Overrides default `OTTO_AGENT_PROMPT`
+- File content read and passed directly to Claude Code
+
+### Claude Code Configuration
+
+**Hook Installation**:
+- Run `otto claude install` to set up stop hook
+- Creates `~/.claude/hooks/otto-stop-hook.sh`
+- Modifies `~/.claude/settings.json` to register hook
+- Hook requires `<PLANE-HAS-LANDED>` marker for exit
+
+**No Configuration Files**:
+Otto itself has no configuration file support. All behavior is determined by:
+1. Command-line arguments and subcommands
 2. Compile-time constants
 3. Beads repository state (read from `.beads/` directory)
+4. Custom prompt files (optional, via CLI flag)
 
 ## Platform Requirements
 
@@ -381,12 +662,16 @@ Otto intentionally has no configuration file support. All behavior is determined
    - Used for agent monitoring
    - Standard Unix utility (usually installed by default)
 
+5. **jq** (JSON processor)
+   - Used by Claude Code stop hook
+   - Required for hook installation
+
 ### Platform Support
 
 **Supported**:
 - Linux (primary target)
 - macOS (with Brew-installed dependencies)
-- Unix-like systems with tmux, pgrep
+- Unix-like systems with tmux, pgrep, jq
 
 **Not Supported**:
 - Windows (no native tmux/pgrep support)
@@ -409,6 +694,7 @@ otto/
 │   ├── otto/          (binary crate)
 │   ├── otto-core/     (library)
 │   ├── otto-beads/    (library)
+│   ├── otto-agent-claude/ (library)
 │   └── otto-tmux/     (library)
 ```
 
@@ -440,6 +726,7 @@ cargo test
 - Idle during agent execution (waiting on process)
 - Polling every 2 seconds during agent monitoring
 - Sleep intervals during waiting periods
+- Stuck window monitoring runs in background thread (watch mode)
 
 **I/O**:
 - Spawns subprocesses (claude, bd, tmux, pgrep)
@@ -449,6 +736,7 @@ cargo test
 
 **Concurrency**:
 - Signal handling thread (daemon)
+- Stuck window monitoring thread (watch mode only)
 - Main thread (control loop)
 - No other threads used
 
@@ -480,10 +768,10 @@ cargo test
 2. **No Metrics or Logging**
    - Simple console output only
    - No structured logging
-   - No performance metrics
+   - No performance metrics (except duration per agent)
 
 3. **No Configuration Files**
-   - Fixed behavior (except `--watch` flag)
+   - Fixed behavior (except subcommands and prompt file)
    - No customization without recompilation
    - Simplifies operation
 
@@ -495,17 +783,22 @@ cargo test
 5. **No Parallel Execution**
    - Only one agent at a time
    - Sequential task processing
-   - Single tmux session
+   - Single tmux session (multiple windows)
 
 6. **Fixed Agent Prompt**
-   - All agents receive identical prompt
+   - All agents receive identical prompt (unless custom file specified)
    - No context or history passed between runs
    - Agent must rediscover tasks each time
+
+7. **Subcommand-Based CLI**
+   - Cannot run agent loop without explicit `ralph` subcommand
+   - Running `otto` without args shows help (doesn't execute)
+   - Intentional design for clarity
 
 ### Design Philosophy
 
 **Simplicity Over Features**:
-- Minimal configuration
+- Minimal configuration (only prompt files via CLI)
 - Clear, predictable behavior
 - Easy to understand and debug
 
@@ -519,18 +812,23 @@ cargo test
 - Graceful shutdown (no task interruption)
 - Clear error messages (easy troubleshooting)
 
+**Tmux-Native**:
+- Uses tmux for session management (not reinventing the wheel)
+- Easy observability (attach to watch agents work)
+- Persistent operation (start and detach)
+
 ## Future Considerations
 
 ### Potential Enhancements (Not Currently Planned)
 
 1. **Configuration File Support**
    - Configurable timeouts
-   - Custom agent prompts
+   - Default prompt file location
    - Session name configuration
 
 2. **Metrics Collection**
-   - Tasks completed
-   - Time per task
+   - Tasks completed per session
+   - Time per task (already shown per agent)
    - Success/failure rates
 
 3. **Parallel Execution**
@@ -548,12 +846,17 @@ cargo test
    - Pluggable agent system
    - Agent-specific configuration
 
+6. **Window Management Commands**
+   - `otto list`: List all windows in otto session
+   - `otto kill <window>`: Kill a specific window
+   - `otto restart`: Restart the main otto window
+
 ### Extension Points
 
 Current architecture allows extension through:
 
-1. **Modify `OTTO_AGENT_PROMPT`**: Change agent behavior
-2. **Add new CLI arguments**: Extend functionality
+1. **Modify prompt files**: Change agent behavior without recompilation
+2. **Add new subcommands**: Extend functionality (e.g., `otto list`)
 3. **Create new dependency crates**: Add integrations
 4. **Implement custom error handling**: Modify recovery strategies
 

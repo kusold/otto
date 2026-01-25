@@ -80,8 +80,8 @@ flowchart TB
 
 ## File Index
 
-1. [otto-cli.md](./otto-cli.md) - 569 lines
-   - CLI interface, watch mode, signal handling, main loop behavior
+1. [otto-cli.md](./otto-cli.md) - 872 lines
+   - CLI interface, subcommands (start, attach, ralph, claude), tmux integration, signal handling, watch mode
 
 2. [otto-tmux.md](./otto-tmux.md) - 605 lines
    - Tmux session management, command execution, availability detection
