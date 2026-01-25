@@ -53,8 +53,26 @@ fi
 
 # Check for task completion marker
 if echo "$LAST_OUTPUT" | grep -q "<PLANE-HAS-LANDED>"; then
-    # Task complete - allow exit
-    echo "✅ Otto: Plane has landed, allowing exit"
+    # Task complete - find and kill parent Claude process
+    echo "✅ Plane has landed, terminating Claude..."
+
+    # Get the parent PID of this hook script
+    HOOK_PID=$$
+    PARENT_PID=$(ps -o ppid= -p $HOOK_PID | tr -d ' ')
+
+    # The parent should be Claude Code - kill it
+    if [[ -n "$PARENT_PID" ]]; then
+        # Double-check it's actually a Claude process before killing
+        if ps -p $PARENT_PID -o command= | grep -q "claude"; then
+            kill $PARENT_PID
+            echo "✅ Terminated Claude process (PID: $PARENT_PID)"
+        else
+            echo "⚠️  Parent process doesn't appear to be Claude, not killing"
+        fi
+    else
+        echo "⚠️  Could not determine parent PID"
+    fi
+
     exit 0
 fi
 
