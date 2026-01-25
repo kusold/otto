@@ -42,3 +42,18 @@ bd sync               # Sync with git
 - If push fails, resolve and retry until it succeeds
 - Ensure you say <PLANE-HAS-LANDED> after successfully completing all steps
 
+## Prompt Handling (Investigated: otto-n08)
+
+**Finding:** Prompts are NOT duplicated in current implementation.
+
+**How prompts are sent:**
+1. `OTTO_AGENT_PROMPT` constant defined in `crates/otto-agent-claude/src/lib.rs`
+2. `build_agent_prompt()` constructs: `claude --dangerously-skip-permissions 'PROMPT'`
+3. `send_otto_command()` sends to tmux via: `tmux send-keys -t otto <cmd> C-m`
+4. Shell executes the claude command with prompt as CLI argument
+
+**NOT used by current Rust implementation:**
+- `PROMPT.md` file (only used by old `bin/ralph-basic.sh`)
+- Stdin piping (old script used `cat PROMPT.md | claude -p`)
+- No .tmux.conf injection mechanism
+
