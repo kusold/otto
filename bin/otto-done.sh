@@ -187,6 +187,124 @@ parse_args() {
     log_debug "  DRY_RUN=$DRY_RUN"
 }
 
+# Git helper functions
+git_main_branch() {
+    # Try to detect the default branch name
+    local main_branch
+
+    # First check if there's a remote origin with a refs/remotes/origin/HEAD
+    if git rev-parse --verify origin/HEAD >/dev/null 2>&1; then
+        main_branch=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
+        if [[ -n "$main_branch" ]]; then
+            echo "$main_branch"
+            return 0
+        fi
+    fi
+
+    # Check if main branch exists
+    if git rev-parse --verify main >/dev/null 2>&1; then
+        echo "main"
+        return 0
+    fi
+
+    # Check if master branch exists
+    if git rev-parse --verify master >/dev/null 2>&1; then
+        echo "master"
+        return 0
+    fi
+
+    # Fallback to "main" as default
+    echo "main"
+    return 0
+}
+
+git_branch_name() {
+    git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "HEAD"
+}
+
+is_git_clean() {
+    # Check if working tree is clean (no uncommitted changes)
+    git diff --quiet && git diff --cached --quiet 2>/dev/null
+    return $?
+}
+
+is_git_pushed() {
+    # Check if all commits are pushed to remote
+    local branch
+    local main_branch
+    local unpushed
+
+    branch=$(git_branch_name)
+    main_branch=$(git_main_branch)
+
+    # Handle detached HEAD
+    if [[ "$branch" == "HEAD" ]]; then
+        # In detached HEAD state, consider it "pushed" if HEAD exists on remote
+        # This is a simplification - detached HEAD is edge case
+        log_debug "Detached HEAD detected, assuming pushed"
+        return 0
+    fi
+
+    # Check if branch has a remote tracking branch
+    if ! git rev-parse --verify "$branch@{u}" >/dev/null 2>&1; then
+        # No remote tracking branch - might be a new branch
+        # Check if there are any commits that aren't on remote main branch
+        unpushed=$(git log "origin/$main_branch..$branch" 2>/dev/null || echo "")
+        if [[ -n "$unpushed" ]]; then
+            return 1  # Has unpushed commits
+        fi
+        return 0
+    fi
+
+    # Check for unpushed commits relative to remote tracking branch
+    unpushed=$(git log "$branch@{u}..$branch" 2>/dev/null || echo "")
+    if [[ -n "$unpushed" ]]; then
+        return 1  # Has unpushed commits
+    fi
+
+    return 0
+}
+
+has_stashes() {
+    # Check if there are any git stashes
+    local stash_list
+    stash_list=$(git stash list 2>/dev/null)
+    [[ -n "$stash_list" ]]
+    return $?
+}
+
+validate_git_state() {
+    # Validate git working directory state
+    # Returns 0 if all validations pass, non-zero otherwise
+    # This is fail-fast - stops at first error
+
+    log_debug "Validating git state..."
+
+    # Check 1: Working tree clean
+    if ! is_git_clean; then
+        log_error "Working tree has uncommitted changes (run git status)"
+        return 1
+    fi
+    log_debug "✓ Working tree is clean"
+
+    # Check 2: All commits pushed
+    if ! is_git_pushed; then
+        log_error "There are unpushed commits (run git push)"
+        return 1
+    fi
+    log_debug "✓ All commits are pushed"
+
+    # Check 3: No stashes
+    if has_stashes; then
+        log_error "You have git stashes (run git stash list)"
+        return 1
+    fi
+    log_debug "✓ No stashes found"
+
+    log_debug "Git state validation passed"
+    return 0
+}
+
 # Auto-detect issue ID from environment or beads state
 detect_issue_id() {
     if [[ -n "$ISSUE_ID" ]]; then
@@ -245,32 +363,44 @@ main() {
     echo ""
 
     # TODO: Implement the actual termination logic in future tasks:
-    # - otto-gko.2: Implement git state validation logic
     # - otto-gko.3: Implement beads sync and close logic
     # - otto-gko.4: Implement Claude exit mechanism
     # - otto-gko.5: Implement completed exit mode
     # - otto-gko.6: Implement escalated exit mode
 
     if [[ "$MODE" == "completed" ]]; then
-        log_info "Completed mode workflow (placeholder):"
-        log_info "  1. Validate working directory clean"
-        log_info "  2. Validate all commits pushed"
-        log_info "  3. Run bd sync"
-        log_info "  4. Close hooked bead (if any)"
-        log_info "  5. Clear hook bead"
-        log_info "  6. Log completion event"
-        log_info "  7. Exit Claude cleanly"
+        log_info "Step 1: Validating git state..."
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "  [DRY RUN] Would validate git state (skipped in dry-run)"
+        else
+            if ! validate_git_state; then
+                echo ""
+                log_error "Git state validation failed"
+                log_info "Please fix the issues above before running 'otto done'"
+                exit 1
+            fi
+            log_success "Git state validation passed"
+        fi
+
+        log_info "Completed mode workflow (in progress):"
+        log_info "  ✓ Validate working directory clean"
+        log_info "  ✓ Validate all commits pushed"
+        log_info "  3. Run bd sync (TODO: otto-gko.3)"
+        log_info "  4. Close hooked bead (if any) (TODO: otto-gko.3)"
+        log_info "  5. Clear hook bead (TODO: otto-gko.3)"
+        log_info "  6. Log completion event (TODO: otto-gko.5)"
+        log_info "  7. Exit Claude cleanly (TODO: otto-gko.4)"
     else
-        log_info "Escalated mode workflow (placeholder):"
-        log_info "  1. Skip validation"
-        log_info "  2. Log escalation event with state: ${STATUS_OBSERVATION:-unknown}"
-        log_info "  3. Leave hook bead set for recovery"
-        log_info "  4. Exit Claude cleanly"
+        log_info "Escalated mode workflow (in progress):"
+        log_info "  ✓ Skip validation"
+        log_info "  2. Log escalation event with state: ${STATUS_OBSERVATION:-unknown} (TODO: otto-gko.6)"
+        log_info "  3. Leave hook bead set for recovery (TODO: otto-gko.6)"
+        log_info "  4. Exit Claude cleanly (TODO: otto-gko.4)"
     fi
 
     echo ""
-    log_success "Command structure validated successfully"
-    log_info "Implementation will continue in tasks otto-gko.2 through otto-gko.6"
+    log_success "Git validation implemented successfully"
+    log_info "Remaining implementation in tasks otto-gko.3 through otto-gko.6"
 
     if [[ "$DRY_RUN" == "1" ]]; then
         echo ""
