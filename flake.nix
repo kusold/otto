@@ -16,7 +16,15 @@
     flake-parts,
     cargo2nix,
     ...
-  }:
+  }: let
+    # Overlay that can be used in other NixOS configurations
+    ottoOverlay = final: prev: {
+      otto = final.callPackage ./nix/package.nix {
+        inherit cargo2nix;
+        inherit (final.stdenv) system;
+      };
+    };
+  in
     flake-parts.lib.mkFlake {inherit inputs;} {
       systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
 
@@ -56,6 +64,11 @@
           type = "app";
           program = "${self.packages.${system}.otto}/bin/otto";
         };
+      };
+
+      # Top-level outputs
+      flake = {
+        overlays.default = ottoOverlay;
       };
     };
 }
