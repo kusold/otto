@@ -76,13 +76,10 @@ if echo "$LAST_OUTPUT" | grep -q "<PLANE-HAS-LANDED>"; then
     exit 0
 fi
 
-# Task not complete - block exit and prompt Claude to continue
+# Task not complete - block exit silently
 jq -n \
-  --arg msg "⚠️  Task not complete yet. Continue working on the assigned task and output <PLANE-HAS-LANDED> when done." \
   '{
-    "decision": "block",
-    "reason": "Task completion marker <PLANE-HAS-LANDED> not found. Continue working.",
-    "systemMessage": $msg
+    "decision": "block"
   }'
 
 exit 0
