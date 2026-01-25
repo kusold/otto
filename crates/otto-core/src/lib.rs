@@ -68,20 +68,23 @@ const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 /// 1. Ensures the otto tmux session exists
 /// 2. Sends the claude command with the fixed prompt to the session
 /// 3. Waits for the agent to complete by checking if the process is still running
+/// 4. Tracks and returns the session duration
 ///
 /// # Arguments
 /// * `timeout_secs` - Maximum time to wait for agent completion (None for default)
 /// * `prompt_file` - Optional path to a file containing the custom prompt
 ///
 /// # Returns
-/// - `Ok(())` if the agent completed successfully
+/// - `Ok(duration)` if the agent completed successfully, where duration is the session length
 /// - `Err(AgentError::ClaudeNotAvailable)` if claude is not installed
 /// - `Err(AgentError::TmuxError)` if tmux operations fail
 /// - `Err(AgentError::AgentStartFailed)` if agent fails to start
 /// - `Err(AgentError::AgentTimeout)` if agent doesn't exit in time
 /// - `Err(AgentError::PromptFileError)` if prompt file cannot be read
 ///
-pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> AgentResult<()> {
+pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> AgentResult<std::time::Duration> {
+    let session_start = std::time::Instant::now();
+
     if !is_claude_available() {
         return Err(AgentError::ClaudeNotAvailable);
     }
@@ -103,7 +106,7 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
     let timeout = timeout_secs.unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS);
     wait_for_claude_exit(timeout)?;
 
-    Ok(())
+    Ok(session_start.elapsed())
 }
 
 /// Launches a Claude Code agent with the default timeout and optional prompt file.
@@ -114,9 +117,9 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
 /// * `prompt_file` - Optional path to a file containing the custom prompt
 ///
 /// # Returns
-/// - `Ok(())` if the agent completed successfully
+/// - `Ok(duration)` if the agent completed successfully, where duration is the session length
 /// - `Err` if there was an error
-pub fn launch_agent_default(prompt_file: Option<&str>) -> AgentResult<()> {
+pub fn launch_agent_default(prompt_file: Option<&str>) -> AgentResult<std::time::Duration> {
     launch_agent(None, prompt_file)
 }
 

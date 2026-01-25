@@ -30,6 +30,33 @@ struct Args {
     prompt_file: Option<String>,
 }
 
+/// Formats a duration into a human-readable string.
+///
+/// Examples:
+/// - "1m 23s" for 83 seconds
+/// - "45s" for 45 seconds
+/// - "1h 5m 30s" for 3930 seconds
+fn format_duration(duration: std::time::Duration) -> String {
+    let total_secs = duration.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    let mut parts = Vec::new();
+
+    if hours > 0 {
+        parts.push(format!("{}h", hours));
+    }
+    if minutes > 0 {
+        parts.push(format!("{}m", minutes));
+    }
+    if seconds > 0 || parts.is_empty() {
+        parts.push(format!("{}s", seconds));
+    }
+
+    parts.join(" ")
+}
+
 /// Sets up signal handlers for SIGINT (Ctrl+C) and SIGTERM.
 ///
 /// When a signal is received, the shutdown flag is set to true, which
@@ -90,8 +117,8 @@ fn run_single_pass(prompt_file: Option<&str>) {
                 // Ready beads exist, launch an agent
                 println!("Starting agent...");
                 match launch_agent_default(prompt_file) {
-                    Ok(()) => {
-                        println!("Agent finished");
+                    Ok(duration) => {
+                        println!("Agent finished (duration: {})", format_duration(duration));
                     }
                     Err(AgentError::AgentTimeout) => {
                         eprintln!("Warning: Agent timed out");
@@ -139,8 +166,8 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                 // Ready beads exist, launch an agent
                 println!("Starting agent...");
                 match launch_agent_default(prompt_file) {
-                    Ok(()) => {
-                        println!("Agent finished");
+                    Ok(duration) => {
+                        println!("Agent finished (duration: {})", format_duration(duration));
                     }
                     Err(AgentError::AgentTimeout) => {
                         eprintln!("Warning: Agent timed out");
