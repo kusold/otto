@@ -510,6 +510,78 @@ pub fn create_agent_window(session_name: &str) -> TmuxResult<String> {
     ))
 }
 
+/// Finds an agent window not running Claude.
+///
+/// This function searches for existing "ralph-*" windows and returns
+/// one where Claude is not actively running. A window is considered
+/// available if:
+/// - No process is running (idle shell)
+/// - A process is running but it's not Claude
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+///
+/// # Returns
+/// - `Ok(Some(String))` containing the window name if a suitable window is found
+/// - `Ok(None)` if no windows are available
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::SessionCheckFailed)` if listing fails
+pub fn find_idle_agent_window(session_name: &str) -> TmuxResult<Option<String>> {
+    let ralph_windows = list_windows_by_pattern(session_name, AGENT_WINDOW_PREFIX)?;
+
+    for window_name in ralph_windows {
+        let pane_spec = get_pane_spec(session_name, &window_name);
+
+        // Check if this window has a Claude process running
+        match get_pane_pid(&pane_spec) {
+            Ok(Some(pid)) => {
+                // Has a process - check if it's Claude
+                let cmdline_path = format!("/proc/{}/cmdline", pid);
+                if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
+                    let command = cmdline.replace('\0', " ");
+                    // If not running Claude, this window is available
+                    if !command.contains("claude") {
+                        return Ok(Some(window_name));
+                    }
+                }
+            }
+            Ok(None) => {
+                // No process running - this window is available
+                return Ok(Some(window_name));
+            }
+            Err(_) => {
+                // Error querying - skip this window
+                continue;
+            }
+        }
+    }
+
+    Ok(None)
+}
+
+/// Gets or creates an agent window, preferring to reuse idle windows.
+///
+/// This function first tries to find an existing agent window that is not
+/// running Claude. If found, it returns that window name.
+/// Otherwise, it creates a new window.
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+///
+/// # Returns
+/// - `Ok(String)` containing the window name
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::WindowCreationFailed)` if creation fails
+pub fn get_or_create_agent_window(session_name: &str) -> TmuxResult<String> {
+    // First, try to find an idle window
+    if let Ok(Some(idle_window)) = find_idle_agent_window(session_name) {
+        return Ok(idle_window);
+    }
+
+    // No idle window found, create a new one
+    create_agent_window(session_name)
+}
+
 /// Lists windows in a session matching a pattern.
 ///
 /// # Arguments
@@ -582,6 +654,57 @@ pub fn kill_window(session_name: &str, window_name: &str) -> TmuxResult<()> {
         }
         Err(e) => Err(TmuxError::CommandExecutionFailed(e.to_string())),
     }
+}
+
+/// Checks if a pane is idle (no Claude process running).
+///
+/// A pane is considered idle if:
+/// - No process is running (None PID), OR
+/// - A shell process is running (bash, zsh, fish) - indicating Claude exited
+///
+/// # Arguments
+/// * `pane_spec` - The pane specification (e.g., "otto:ralph-xxx.0")
+///
+/// # Returns
+/// - `Ok(true)` if the pane is idle
+/// - `Ok(false)` if the pane has an active non-shell process
+/// - `Err` if there was an error querying the pane
+fn is_pane_idle(pane_spec: &str) -> TmuxResult<bool> {
+    match get_pane_command(pane_spec)? {
+        Some(command) => {
+            // Check if it's a shell process (bash, zsh, fish)
+            let shell_names = ["bash", "zsh", "fish", "sh"];
+            let is_shell = shell_names.iter().any(|shell| {
+                command.contains(shell) && !command.contains("claude")
+            });
+            Ok(is_shell)
+        }
+        None => Ok(true), // No process running = idle
+    }
+}
+
+/// Finds an idle ralph-* window in the otto session.
+///
+/// An idle window is one where:
+/// - No process is running, OR
+/// - Only a shell process is running (bash, zsh, fish)
+///
+/// # Returns
+/// - `Ok(Some(String))` containing the window name if an idle window is found
+/// - `Ok(None)` if no idle windows exist
+/// - `Err` if there was an error
+pub fn find_idle_ralph_window() -> TmuxResult<Option<String>> {
+    let ralph_windows = list_windows_by_pattern(OTTO_SESSION_NAME, AGENT_WINDOW_PREFIX)?;
+
+    for window_name in ralph_windows {
+        let pane_spec = get_pane_spec(OTTO_SESSION_NAME, &window_name);
+
+        if is_pane_idle(&pane_spec)? {
+            return Ok(Some(window_name));
+        }
+    }
+
+    Ok(None)
 }
 
 /// Captures the content of a pane.

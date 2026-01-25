@@ -33,6 +33,7 @@
       systems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
 
       perSystem = {
+        config,
         pkgs,
         system,
         ...
@@ -62,13 +63,11 @@
             # Core development tools
             pkg-config
 
-            # Pre-commit hooks (prek)
-            prek
-
             # Additional tools can be added here, e.g.:
             # tmux
             # just
             # jq
+            # Note: prek is not available in all nixpkgs versions
           ];
 
           # Environment variables
@@ -95,7 +94,7 @@
         # Default app
         apps.default = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/otto";
+          program = "${config.packages.default}/bin/otto";
         };
       };
 

@@ -52,7 +52,7 @@ fi
 # Change to project root (bd commands need to run from repo root)
 cd "$PROJECT_ROOT" || exit 1
 
-# Create the blocking bead
+# Create the blocking bead (silent mode to suppress JSON output)
 SPLIT_BEAD_ID=$(
     bd create \
         --title="Split bead $CURRENT_BEAD_ID into smaller focused tasks" \
@@ -70,14 +70,14 @@ SPLIT_BEAD_ID=$(
 **Goal:** Ensure each bead focuses on a single coherent piece of work.
 
 This bead was automatically created by the PreCompact hook when conversation size approached compaction threshold." \
-        --output=id
+        --silent 2>/dev/null
 )
 
 log "Created blocking bead: $SPLIT_BEAD_ID"
 
-# Add dependency relationship: current bead depends on split bead
+# Add dependency relationship: current bead depends on split bead (suppress all output)
 if [[ -n "$SPLIT_BEAD_ID" ]]; then
-    bd dep add "$CURRENT_BEAD_ID" "$SPLIT_BEAD_ID"
+    bd dep add "$CURRENT_BEAD_ID" "$SPLIT_BEAD_ID" >/dev/null 2>&1
     log "Added dependency: $CURRENT_BEAD_ID depends on $SPLIT_BEAD_ID"
 else
     log "ERROR: Failed to create split bead"

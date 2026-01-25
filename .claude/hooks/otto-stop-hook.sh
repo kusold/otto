@@ -30,7 +30,7 @@ if ! grep -q '"role":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null; then
 fi
 
 # Extract last assistant message
-LAST_LINE=$(grep '"role":"assistant"' "$TRANSCRIPT_PATH" | tail -1)
+LAST_LINE=$(grep '"role":"assistant"' "$TRANSCRIPT_PATH" 2>/dev/null | tail -1)
 
 if [[ -z "$LAST_LINE" ]]; then
     # No assistant message found - allow exit
@@ -43,7 +43,7 @@ LAST_OUTPUT=$(echo "$LAST_LINE" | jq -r '
   map(select(.type == "text")) |
   map(.text) |
   join("\n")
-' 2>&1)
+' 2>/dev/null)
 
 # Check if jq succeeded
 if [[ $? -ne 0 ]]; then
@@ -54,7 +54,6 @@ fi
 # Check for task completion marker
 if echo "$LAST_OUTPUT" | grep -q "<PLANE-HAS-LANDED>" 2>/dev/null; then
     # Task complete - find and kill parent Claude process
-    echo "✅ Plane has landed, terminating Claude..."
 
     # Get the parent PID of this hook script
     HOOK_PID=$$
@@ -65,21 +64,12 @@ if echo "$LAST_OUTPUT" | grep -q "<PLANE-HAS-LANDED>" 2>/dev/null; then
         # Double-check it's actually a Claude process before killing
         if ps -p $PARENT_PID -o command= | grep -q "claude"; then
             kill $PARENT_PID
-            echo "✅ Terminated Claude process (PID: $PARENT_PID)"
-        else
-            echo "⚠️  Parent process doesn't appear to be Claude, not killing"
         fi
-    else
-        echo "⚠️  Could not determine parent PID"
     fi
 
     exit 0
 fi
 
-# Task not complete - block exit silently
-jq -n \
-  '{
-    "decision": "allow"
-  }'
-
+# Task not complete - allow exit silently
+# No output to prevent JSON logs in conversation
 exit 0
