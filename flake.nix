@@ -25,16 +25,6 @@
         system,
         ...
       }: let
-        overlays = [(import rust-overlay)];
-        pkgsWithOverlays = import nixpkgs {
-          inherit system overlays;
-        };
-
-        # Rust toolchain for development shell
-        rustToolchain = pkgsWithOverlays.rust-bin.stable.latest.default.override {
-          extensions = ["rust-src" "rust-analyzer"];
-        };
-
         # Setup cargo2nix overlay for package building with rust-overlay
         pkgsWithCargo2nix = import nixpkgs {
           inherit system;
@@ -51,27 +41,14 @@
           packageFun = import ./Cargo.nix;
         };
       in {
-        # Development shell (uses traditional rust-overlay)
-        devShells.default = pkgsWithOverlays.mkShell {
-          buildInputs = with pkgsWithOverlays; [
-            rustToolchain
-            cargo
-            rustc
-            pkg-config
-            prek
-          ];
-
-          RUST_SRC_PATH = "${pkgsWithOverlays.rustPlatform.rustLibSrc}";
-        };
+        # Development shell using cargo2nix (includes all dependencies)
+        devShells.default = rustPkgs.workspaceShell {};
 
         # Packages built with cargo2nix
         packages = rec {
           # The main otto binary
           otto = rustPkgs.workspace.otto {};
           default = otto;
-
-          # Development shell from cargo2nix (includes all dependencies)
-          devShell = rustPkgs.workspaceShell {};
         };
 
         # Default app
