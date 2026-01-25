@@ -70,7 +70,7 @@ SPLIT_BEAD_ID=$(
 **Goal:** Ensure each bead focuses on a single coherent piece of work.
 
 This bead was automatically created by the PreCompact hook when conversation size approached compaction threshold." \
-        --silent 2>/dev/null
+        --silent >/dev/null 2>&1
 )
 
 log "Created blocking bead: $SPLIT_BEAD_ID"

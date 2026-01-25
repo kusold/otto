@@ -103,7 +103,7 @@ const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 ///
 /// This function:
 /// 1. Ensures the otto tmux session exists
-/// 2. Creates a new tmux window with a unique 'ralph-*' name
+/// 2. Finds an idle 'ralph-*' window if one exists (reusing it), or creates a new one
 /// 3. Sends the claude command with the fixed prompt to that window
 /// 4. Waits for the agent to complete by checking the specific pane
 /// 5. Shows progress on stderr while waiting (continuously rewritten line with elapsed time)
@@ -136,8 +136,11 @@ pub fn launch_agent(
     // Ensure the otto tmux session exists
     ensure_otto_session()?;
 
-    // Create a new window with a unique agent name
-    let window_name = create_agent_window(otto_tmux::OTTO_SESSION_NAME)?;
+    // Try to find an idle ralph window to reuse, or create a new one
+    let window_name = match find_idle_ralph_window()? {
+        Some(idle_window) => idle_window,
+        None => create_agent_window(otto_tmux::OTTO_SESSION_NAME)?,
+    };
 
     // Get the prompt from file or use default
     let prompt = get_prompt(prompt_file)
