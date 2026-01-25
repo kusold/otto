@@ -27,6 +27,12 @@ struct Args {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
+    /// Start otto in tmux
+    ///
+    /// Launches otto in a tmux window named 'otto', running in watch mode.
+    /// This is the recommended way to run otto persistently.
+    Start,
+
     /// Run the agent loop (default behavior)
     ///
     /// Continuously checks for ready-to-work beads tasks and spawns
@@ -144,6 +150,12 @@ fn main() {
     setup_signal_handlers();
 
     match args.command {
+        Some(Commands::Start) => {
+            if let Err(e) = start_otto() {
+                print_error(&format!("starting otto: {}", e));
+                std::process::exit(1);
+            }
+        }
         Some(Commands::Ralph { watch, prompt_file }) => {
             // Convert the prompt_file Option<String> to Option<&str>
             let prompt_file = prompt_file.as_deref();
@@ -170,18 +182,57 @@ fn main() {
             println!("Otto - Autonomous agent runner for beads tasks\n");
             println!("Usage: otto <COMMAND>\n");
             println!("Commands:");
+            println!("  start   Start otto in tmux (runs in background)");
             println!("  ralph   Run the agent loop (default behavior)");
             println!("  claude  Manage Claude Code integration");
             println!("\nFlags:");
             println!("  -h, --help     Print help");
             println!("  -V, --version  Print version");
             println!("\nExamples:");
+            println!("  otto start              Start otto in tmux");
             println!("  otto ralph              Run in single-pass mode");
             println!("  otto ralph --watch      Run in watch mode (infinite loop)");
             println!("  otto ralph -p promp.txt Use custom prompt file");
             println!("  otto claude install     Install Claude Code stop hook");
         }
     }
+}
+
+/// Start otto in tmux.
+///
+/// This function:
+/// 1. Ensures tmux server is running (starts if needed)
+/// 2. Ensures the 'otto' tmux session exists (creates if needed)
+/// 3. Creates a window named 'otto' (if it doesn't exist)
+/// 4. Runs 'otto ralph --watch' in that window
+/// 5. Prints confirmation with window name
+fn start_otto() -> Result<(), Box<dyn std::error::Error>> {
+    use otto_tmux::{ensure_session, send_command_to_window, window_exists, OTTO_SESSION_NAME};
+
+    const OTTO_WINDOW_NAME: &str = "otto";
+
+    // Ensure the otto session exists
+    ensure_session(OTTO_SESSION_NAME)?;
+
+    // Check if the 'otto' window already exists
+    let window_already_existed = window_exists(OTTO_SESSION_NAME, OTTO_WINDOW_NAME)?;
+
+    if !window_already_existed {
+        // Create the window named 'otto'
+        otto_tmux::create_named_window(OTTO_SESSION_NAME, OTTO_WINDOW_NAME)?;
+    }
+
+    // Send 'otto ralph --watch' command to the window
+    send_command_to_window(OTTO_SESSION_NAME, OTTO_WINDOW_NAME, "otto ralph --watch")?;
+
+    if window_already_existed {
+        println!("Started otto in existing window: {}", OTTO_WINDOW_NAME);
+    } else {
+        println!("Started otto in new window: {}", OTTO_WINDOW_NAME);
+    }
+    println!("Attach with: tmux attach-session -t {}:{}", OTTO_SESSION_NAME, OTTO_WINDOW_NAME);
+
+    Ok(())
 }
 
 fn run_single_pass(prompt_file: Option<&str>) {

@@ -232,6 +232,7 @@ dependencies = [
  "otto-agent-claude",
  "otto-beads",
  "otto-core",
+ "otto-tmux",
  "serde_json",
  "signal-hook",
 ]
