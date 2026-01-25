@@ -6,6 +6,12 @@
 
 use std::process::Command;
 
+/// Shell-escapes a string for safe use in shell commands.
+fn escape_shell_arg(s: &str) -> String {
+    // Simple POSIX shell escaping: wrap in single quotes and escape single quotes
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// Error type for Claude operations.
 #[derive(Debug)]
 pub enum ClaudeError {
@@ -46,9 +52,14 @@ pub type ClaudeResult<T> = Result<T, ClaudeError>;
 /// 1. Check for ready beads tasks
 /// 2. Choose one task
 /// 3. Work only on that task
-/// 4. Exit when done
+/// 4. Output the task completion marker when done
+/// 5. Exit after completing the task
+///
+/// The agent attempts to exit after outputting <PLANE-HAS-LANDED>.
+/// The stop hook then allows the exit by detecting the marker.
+/// This enables interactive mode while ensuring clean exit after task completion.
 pub const OTTO_AGENT_PROMPT: &str =
-    "Run bd ready, choose a bead, begin work on only that bead. Exit when done.";
+    "Run bd ready, choose a bead, begin work on only that bead. When done, output <PLANE-HAS-LANDED> and then exit. Land the plane.";
 
 /// Checks if Claude Code CLI is available.
 ///
@@ -219,8 +230,12 @@ pub fn wait_for_claude_exit_with_progress(
 
 /// Builds a Claude agent command from a prompt string.
 ///
-/// Constructs a claude command with the given prompt, including the
-/// `--dangerously-skip-permissions` flag for automated execution.
+/// Constructs a claude command with the given prompt, including:
+/// - `--dangerously-skip-permissions` for automated execution
+///
+/// The agent runs in interactive mode and exits when the stop hook detects
+/// the <PLANE-HAS-LANDED> marker in the output. This provides full
+/// interactivity while ensuring clean exit after task completion.
 ///
 /// # Arguments
 /// * `prompt` - The prompt string to pass to claude
@@ -228,7 +243,11 @@ pub fn wait_for_claude_exit_with_progress(
 /// # Returns
 /// A shell command string that can be executed
 pub fn build_agent_prompt(prompt: &str) -> String {
-    format!("claude --dangerously-skip-permissions \"{}\"", prompt)
+    // Stop hook handles exit via <PLANE-HAS-LANDED> marker detection
+    format!(
+        "claude --dangerously-skip-permissions {}",
+        escape_shell_arg(prompt)
+    )
 }
 
 /// Reads a prompt from a file, or returns the default prompt.
@@ -279,13 +298,15 @@ mod tests {
     #[test]
     fn test_otto_agent_prompt_constant() {
         assert!(OTTO_AGENT_PROMPT.contains("bd ready"));
-        assert!(OTTO_AGENT_PROMPT.contains("Exit when done"));
+        assert!(OTTO_AGENT_PROMPT.contains("<PLANE-HAS-LANDED>"));
     }
 
     #[test]
     fn test_build_agent_prompt() {
         let cmd = build_agent_prompt("test prompt");
         assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(!cmd.contains("--print"));  // Should NOT contain --print
+        assert!(!cmd.contains("--output-format"));  // Should NOT contain output-format
         assert!(cmd.contains("test prompt"));
     }
 
