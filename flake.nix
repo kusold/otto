@@ -2,8 +2,8 @@
   description = "Otto - CLI tool for managing development workflows";
 
   inputs = {
-    # Pin nixpkgs to 24.05 for compatibility with cargo2nix (before darwin.apple_sdk_11_0 removal)
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
+    # Pin nixpkgs to 24.05 for compatibility with cargo2nix (with the new apple-sdk pattern while remaining compatible with cargo2nix)
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-parts.url = "github:hercules-ci/flake-parts";
     cargo2nix = {
