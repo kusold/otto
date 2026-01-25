@@ -58,7 +58,7 @@
             cargo
             rustc
             pkg-config
-            pre-commit
+            prek
           ];
 
           RUST_SRC_PATH = "${pkgsWithOverlays.rustPlatform.rustLibSrc}";

@@ -1,9 +1,0 @@
-repos:
-  - repo: local
-    hooks:
-      - id: nix-build
-        name: nix build
-        entry: nix build ".#"
-        language: system
-        pass_filenames: false
-        always_run: true

@@ -1,0 +1,6 @@
+[hooks.nix-build]
+command = "nix build"
+run_on = "pre-commit"
+
+[default]
+fail_fast = true
