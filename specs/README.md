@@ -86,7 +86,7 @@ flowchart TB
 2. [otto-tmux.md](./otto-tmux.md) - 605 lines
    - Tmux session management, command execution, availability detection
 
-3. [otto-core.md](./otto-core.md) - 455 lines
+3. [otto-core.md](./otto-core.md) - 708 lines
    - Agent orchestration, lifecycle management, coordination
 
 4. [otto-agent-claude.md](./otto-agent-claude.md) - TBD lines
