@@ -186,7 +186,7 @@ Build a Claude Code command with the given prompt.
 **Example:**
 ```rust
 let cmd = build_agent_prompt("Run tests");
-// Returns: "claude --dangerously-skip-permissions \"Run tests\""
+// Returns: "claude --dangerously-skip-permissions --print \"Run tests\""
 ```
 
 #### `get_prompt(prompt_file: Option<&str>) -> Result<String, std::io::Error>`
@@ -267,7 +267,7 @@ Command construction includes the `--dangerously-skip-permissions` flag:
 
 ```rust
 pub fn build_agent_prompt(prompt: &str) -> String {
-    format!("claude --dangerously-skip-permissions \"{}\"", prompt)
+    format!("claude --dangerously-skip-permissions --print \"{}\"", prompt)
 }
 ```
 
@@ -450,7 +450,7 @@ Integration tests would require Claude Code CLI to be installed:
 The crate constructs shell commands:
 
 ```rust
-format!("claude --dangerously-skip-permissions \"{}\"", prompt)
+format!("claude --dangerously-skip-permissions --print \"{}\"", prompt)
 ```
 
 **Risks:**
