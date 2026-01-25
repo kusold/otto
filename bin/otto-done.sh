@@ -27,6 +27,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # Configuration
 LOG_FILE="$PROJECT_ROOT/.beads/terminations.log"
+HOOK_FILE="$PROJECT_ROOT/.beads/hook"
 DEBUG="${OTTO_DEBUG:-0}"
 DRY_RUN=0
 
@@ -305,6 +306,135 @@ validate_git_state() {
     return 0
 }
 
+# Beads helper functions
+sync_beads() {
+    # Run bd sync to synchronize beads state
+    # Returns 0 if sync succeeds, non-zero otherwise
+
+    log_debug "Running bd sync..."
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_debug "  [DRY RUN] Would run: bd sync"
+        return 0
+    fi
+
+    # Run bd sync and capture output
+    if ! bd sync >/dev/null 2>&1; then
+        log_error "bd sync failed"
+        log_error "Check network connection or run 'bd sync' manually"
+        return 1
+    fi
+
+    log_debug "✓ bd sync successful"
+    return 0
+}
+
+detect_hooked_bead() {
+    # Detect the currently hooked bead ID
+    # Checks OTTO_CURRENT_BEAD env var, then .beads/hook file
+    # Returns 0 and sets HOOKED_BEAD_ID if found, returns 1 otherwise
+
+    # Try OTTO_CURRENT_BEAD environment variable first
+    if [[ -n "${OTTO_CURRENT_BEAD:-}" ]]; then
+        HOOKED_BEAD_ID="$OTTO_CURRENT_BEAD"
+        log_debug "Detected hooked bead from OTTO_CURRENT_BEAD: $HOOKED_BEAD_ID"
+        return 0
+    fi
+
+    # Try reading from .beads/hook file
+    if [[ -f "$HOOK_FILE" ]]; then
+        local hook_content
+        hook_content=$(cat "$HOOK_FILE" 2>/dev/null || echo "")
+        if [[ -n "$hook_content" ]]; then
+            HOOKED_BEAD_ID="$hook_content"
+            log_debug "Detected hooked bead from .beads/hook: $HOOKED_BEAD_ID"
+            return 0
+        fi
+    fi
+
+    log_debug "No hooked bead detected (OTTO_CURRENT_BEAD not set, .beads/hook not found or empty)"
+    HOOKED_BEAD_ID=""
+    return 1
+}
+
+close_hooked_bead() {
+    # Close the hooked bead with appropriate message
+    # Returns 0 if close succeeds or no bead hooked, non-zero on failure
+
+    # First detect the hooked bead
+    if ! detect_hooked_bead; then
+        log_debug "No hooked bead to close"
+        return 0
+    fi
+
+    local bead_id="$HOOKED_BEAD_ID"
+    local close_message="$1"
+
+    log_debug "Closing hooked bead: $bead_id"
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "  [DRY RUN] Would run: bd close $bead_id"
+        return 0
+    fi
+
+    # Attempt to close the bead
+    # Use close_reason if provided, otherwise use default
+    if [[ -n "$close_message" ]]; then
+        if ! bd close "$bead_id" --reason="$close_message" >/dev/null 2>&1; then
+            log_warning "Failed to close bead $bead_id (continuing anyway)"
+            return 1
+        fi
+    else
+        if ! bd close "$bead_id" >/dev/null 2>&1; then
+            log_warning "Failed to close bead $bead_id (continuing anyway)"
+            return 1
+        fi
+    fi
+
+    log_success "Closed hooked bead: $bead_id"
+    return 0
+}
+
+clear_hook_bead() {
+    # Clear hook bead state (env var and file)
+    # Returns 0 if cleanup succeeds, non-zero on failure
+
+    log_debug "Clearing hook bead state..."
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_debug "  [DRY RUN] Would clear hook bead state"
+        return 0
+    fi
+
+    local cleanup_success=0
+
+    # Clear OTTO_CURRENT_BEAD environment variable
+    # Note: This only affects the current shell and child processes
+    # The environment variable in the parent shell cannot be unset from here
+    log_debug "  OTTO_CURRENT_BEAD will be cleared in new shell sessions"
+
+    # Remove .beads/hook file if it exists
+    if [[ -f "$HOOK_FILE" ]]; then
+        if rm "$HOOK_FILE" 2>/dev/null; then
+            log_debug "  ✓ Removed .beads/hook file"
+            cleanup_success=1
+        else
+            log_warning "  Failed to remove .beads/hook file"
+        fi
+    else
+        log_debug "  .beads/hook file does not exist (nothing to clear)"
+        cleanup_success=1
+    fi
+
+    if [[ $cleanup_success -eq 1 ]]; then
+        log_debug "✓ Hook bead state cleared"
+        return 0
+    else
+        log_warning "Hook bead state partially cleared"
+        return 1
+    fi
+}
+
 # Auto-detect issue ID from environment or beads state
 detect_issue_id() {
     if [[ -n "$ISSUE_ID" ]]; then
@@ -515,10 +645,38 @@ main() {
             exit_message="git validation passed"
         fi
 
-        # TODO: otto-gko.3 - Beads sync and close logic
-        log_info "Step 2: Run bd sync (TODO: otto-gko.3)"
-        log_info "Step 3: Close hooked bead (TODO: otto-gko.3)"
-        log_info "Step 4: Clear hook bead (TODO: otto-gko.3)"
+        # Step 2: Sync beads
+        log_info "Step 2: Syncing beads..."
+        if ! sync_beads; then
+            echo ""
+            log_error "Beads sync failed"
+            log_info "Run 'bd sync' manually to resolve sync issues"
+
+            # Log failed sync
+            log_termination_event "completed" "failed" "bd sync failed"
+
+            exit 1
+        fi
+        log_success "Beads synced"
+        exit_message="$exit_message, beads synced"
+
+        # Step 3: Close hooked bead
+        log_info "Step 3: Closing hooked bead (if any)..."
+        if close_hooked_bead "Issue completed via otto done"; then
+            log_success "Bead closed successfully"
+            exit_message="$exit_message, bead closed"
+        else
+            log_warning "Bead close encountered issues (continuing)"
+        fi
+
+        # Step 4: Clear hook bead state
+        log_info "Step 4: Clearing hook bead state..."
+        if clear_hook_bead; then
+            log_success "Hook bead state cleared"
+            exit_message="$exit_message, hook cleared"
+        else
+            log_warning "Hook bead cleanup encountered issues (continuing)"
+        fi
 
         # Step 5: Log completion event
         log_termination_event "completed" "success" "$exit_message"
@@ -540,15 +698,33 @@ main() {
         log_info "  ✓ Skip validation (escalated mode)"
         log_info "  ✓ Git state observation: ${STATUS_OBSERVATION:-unknown}"
 
-        # TODO: otto-gko.6 - Escalated mode enhancements
-        # Step 2: Log escalation event
+        # Step 2: Attempt bd sync (best effort)
+        log_info "Step 2: Attempting bd sync (best effort)..."
+        if ! sync_beads; then
+            log_warning "Beads sync failed (continuing anyway - escalated mode)"
+        else
+            log_success "Beads synced (best effort)"
+        fi
+
+        # Step 3: Detect hooked bead for logging
+        log_info "Step 3: Detecting hooked bead for recovery..."
+        local hooked_bead_for_recovery=""
+        if detect_hooked_bead; then
+            hooked_bead_for_recovery="$HOOKED_BEAD_ID"
+            log_info "  ✓ Leaving hooked bead open: $hooked_bead_for_recovery"
+            log_info "  ✓ Run 'otto ralph $hooked_bead_for_recovery' to resume work"
+        else
+            log_debug "  No hooked bead detected"
+        fi
+
+        # Step 4: Log escalation event
         local escalated_msg="escalated with state: ${STATUS_OBSERVATION:-unknown}"
+        if [[ -n "$hooked_bead_for_recovery" ]]; then
+            escalated_msg="$escalated_msg, bead $hooked_bead_for_recovery left open"
+        fi
         log_termination_event "escalated" "success" "$escalated_msg"
 
-        # TODO: otto-gko.6 - Leave hook bead set for recovery
-        log_info "Step 3: Leave hook bead set for recovery (TODO: otto-gko.6)"
-
-        # Step 4: Exit Claude cleanly
+        # Step 5: Exit Claude cleanly
         if [[ "$DRY_RUN" == "1" ]]; then
             log_info "Step 4: [DRY RUN] Would exit Claude cleanly"
         else
@@ -575,7 +751,7 @@ main() {
         log_info "Exit mechanism would have been triggered"
     fi
 
-    log_debug "Remaining implementation in tasks otto-gko.3, otto-gko.5, otto-gko.6"
+    log_debug "Remaining implementation in tasks otto-gko.5, otto-gko.6"
 }
 
 main "$@"

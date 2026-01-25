@@ -180,10 +180,10 @@ result=$(run_otto_done --mode escalated --status clean)
 exit_code=$(echo "$result" | head -1)
 if [[ "$exit_code" == "0" ]]; then
     output=$(echo "$result" | tail -n +2)
-    if echo "$output" | grep -q "state: clean"; then
+    if echo "$output" | grep -q "observation: clean"; then
         test_pass
     else
-        test_fail "state: clean" "$output"
+        test_fail "observation: clean" "$output"
     fi
 else
     test_fail "exit code 0" "exit code $exit_code"
@@ -195,10 +195,10 @@ result=$(run_otto_done --mode escalated --status uncommitted)
 exit_code=$(echo "$result" | head -1)
 if [[ "$exit_code" == "0" ]]; then
     output=$(echo "$result" | tail -n +2)
-    if echo "$output" | grep -q "state: uncommitted"; then
+    if echo "$output" | grep -q "observation: uncommitted"; then
         test_pass
     else
-        test_fail "state: uncommitted" "$output"
+        test_fail "observation: uncommitted" "$output"
     fi
 else
     test_fail "exit code 0" "exit code $exit_code"
@@ -210,10 +210,10 @@ result=$(run_otto_done --mode escalated --status unpushed)
 exit_code=$(echo "$result" | head -1)
 if [[ "$exit_code" == "0" ]]; then
     output=$(echo "$result" | tail -n +2)
-    if echo "$output" | grep -q "state: unpushed"; then
+    if echo "$output" | grep -q "observation: unpushed"; then
         test_pass
     else
-        test_fail "state: unpushed" "$output"
+        test_fail "observation: unpushed" "$output"
     fi
 else
     test_fail "exit code 0" "exit code $exit_code"
