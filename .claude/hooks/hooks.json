@@ -1,0 +1,15 @@
+{
+  "description": "Otto agent Stop hook - allows exit when task completion marker is detected",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/otto-stop-hook.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
