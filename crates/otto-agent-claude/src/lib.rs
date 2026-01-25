@@ -193,10 +193,7 @@ pub fn wait_for_claude_exit_with_progress(
 /// Builds a Claude agent command from a prompt string.
 ///
 /// Constructs a claude command with the given prompt, including the
-/// `--dangerously-skip-permissions` and `--print` flags for proper exit behavior.
-///
-/// The `--print` flag ensures Claude exits after completing the task instead of
-/// staying in interactive mode, which is critical for automated agent execution.
+/// `--dangerously-skip-permissions` flag for automated execution.
 ///
 /// # Arguments
 /// * `prompt` - The prompt string to pass to claude
@@ -204,7 +201,7 @@ pub fn wait_for_claude_exit_with_progress(
 /// # Returns
 /// A shell command string that can be executed
 pub fn build_agent_prompt(prompt: &str) -> String {
-    format!("claude --dangerously-skip-permissions --print \"{}\"", prompt)
+    format!("claude --dangerously-skip-permissions \"{}\"", prompt)
 }
 
 /// Reads a prompt from a file, or returns the default prompt.
@@ -236,7 +233,6 @@ mod tests {
     fn test_build_agent_prompt() {
         let cmd = build_agent_prompt("test prompt");
         assert!(cmd.contains("claude --dangerously-skip-permissions"));
-        assert!(cmd.contains("--print"));
         assert!(cmd.contains("test prompt"));
     }
 
