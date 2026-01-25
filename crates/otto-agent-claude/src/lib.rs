@@ -141,6 +141,11 @@ pub fn is_claude_process(pid: u32) -> bool {
 /// The callback receives the elapsed duration as a parameter.
 pub type ProgressCallback = fn(std::time::Duration);
 
+/// Callback type for abort checking during agent wait.
+///
+/// The callback returns true if the wait should be aborted.
+pub type AbortCallback = fn() -> bool;
+
 /// Waits for Claude to exit within the specified timeout.
 ///
 /// Polls every 2 seconds to check if claude is still running.
@@ -152,24 +157,27 @@ pub type ProgressCallback = fn(std::time::Duration);
 /// - `Ok(())` if claude has exited
 /// - `Err(ClaudeError::ClaudeTimeout)` if timeout is reached
 pub fn wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()> {
-    wait_for_claude_exit_with_progress(timeout_secs, None)
+    wait_for_claude_exit_with_progress(timeout_secs, None, None)
 }
 
 /// Waits for Claude to exit within the specified timeout, with optional progress updates.
 ///
 /// Polls every 2 seconds to check if claude is still running.
 /// If a progress callback is provided, it will be called every 2 seconds with the elapsed time.
+/// If an abort callback is provided and returns true, claude will be killed and the function returns Ok.
 ///
 /// # Arguments
 /// * `timeout_secs` - Maximum time to wait in seconds
 /// * `progress_callback` - Optional callback function for progress updates
+/// * `abort_callback` - Optional callback function that returns true if wait should be aborted
 ///
 /// # Returns
-/// - `Ok(())` if claude has exited
+/// - `Ok(())` if claude has exited (or was aborted via callback)
 /// - `Err(ClaudeError::ClaudeTimeout)` if timeout is reached
 pub fn wait_for_claude_exit_with_progress(
     timeout_secs: u64,
     progress_callback: Option<ProgressCallback>,
+    abort_callback: Option<AbortCallback>,
 ) -> ClaudeResult<()> {
     let timeout = std::time::Duration::from_secs(timeout_secs);
     let start = std::time::Instant::now();
@@ -177,6 +185,25 @@ pub fn wait_for_claude_exit_with_progress(
     while start.elapsed() < timeout {
         if !is_claude_running() {
             return Ok(());
+        }
+
+        // Check if abort is requested
+        if let Some(callback) = abort_callback {
+            if callback() {
+                // Abort requested, kill claude and wait for it to exit
+                kill_claude();
+                // Wait for claude to actually exit (give it up to 5 seconds)
+                let kill_timeout = std::time::Duration::from_secs(5);
+                let kill_start = std::time::Instant::now();
+                while kill_start.elapsed() < kill_timeout {
+                    if !is_claude_running() {
+                        return Ok(());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                // If claude is still running after kill_timeout, return anyway
+                return Ok(());
+            }
         }
 
         // Call progress callback if provided
@@ -217,6 +244,32 @@ pub fn get_prompt(prompt_file: Option<&str>) -> Result<String, std::io::Error> {
         Some(path) => std::fs::read_to_string(path).map(|s| s.trim().to_string()),
         None => Ok(OTTO_AGENT_PROMPT.to_string()),
     }
+}
+
+/// Kills all running Claude processes.
+///
+/// Uses `pkill` to terminate all claude processes immediately.
+/// This is a forceful termination intended for emergency shutdown scenarios.
+///
+/// # Returns
+/// - `true` if any claude processes were killed
+/// - `false` if no claude processes were running
+///
+/// # Example
+/// ```rust
+/// use otto_agent_claude::kill_claude;
+///
+/// if kill_claude() {
+///     println!("Killed running Claude agent");
+/// }
+/// ```
+pub fn kill_claude() -> bool {
+    Command::new("pkill")
+        .arg("-x")
+        .arg("claude")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 #[cfg(test)]

@@ -1,10 +1,16 @@
 use clap::Parser;
+use otto_agent_claude::AbortCallback;
 use otto_beads::{has_ready_tasks, BeadsError};
 use otto_core::{color::print_error, color::print_warning, launch_agent_default, AgentError};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 /// Global shutdown flag, set by signal handlers
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Global counter for number of shutdown signals received
+/// First signal: graceful shutdown (wait for agent)
+/// Second signal: force kill and exit immediately
+static SHUTDOWN_COUNT: AtomicU8 = AtomicU8::new(0);
 
 /// Otto - Autonomous agent runner for beads tasks
 ///
@@ -59,8 +65,11 @@ fn format_duration(duration: std::time::Duration) -> String {
 
 /// Sets up signal handlers for SIGINT (Ctrl+C) and SIGTERM.
 ///
-/// When a signal is received, the shutdown flag is set to true, which
-/// will cause the main loop to exit gracefully after the current agent finishes.
+/// Signal handling behavior:
+/// - First signal: Set shutdown flag, wait for agent to finish gracefully
+/// - Second signal (Ctrl+C only): Kill running agent immediately and exit
+///
+/// SIGTERM always triggers graceful shutdown (no force kill).
 fn setup_signal_handlers() {
     use signal_hook::iterator::Signals;
 
@@ -72,7 +81,21 @@ fn setup_signal_handlers() {
     std::thread::spawn(move || {
         for sig in signals.forever() {
             match sig {
-                signal_hook::consts::SIGINT | signal_hook::consts::SIGTERM => {
+                signal_hook::consts::SIGINT => {
+                    let count = SHUTDOWN_COUNT.fetch_add(1, Ordering::SeqCst);
+
+                    if count == 0 {
+                        // First Ctrl+C: graceful shutdown, kill agent if running
+                        SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
+                        println!("\nShutdown signal received, terminating agent...");
+                        println!("Agent will be killed gracefully. Press Ctrl+C again to force exit.");
+                    } else {
+                        // Second Ctrl+C: force exit immediately
+                        println!("\nForce exit requested");
+                        std::process::exit(130); // 128 + SIGINT (standard exit code for Ctrl+C)
+                    }
+                }
+                signal_hook::consts::SIGTERM => {
                     if !SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
                         SHUTDOWN_REQUESTED.store(true, Ordering::SeqCst);
                         println!("\nShutdown signal received, waiting for agent to finish...");
@@ -116,7 +139,11 @@ fn run_single_pass(prompt_file: Option<&str>) {
             Ok(true) => {
                 // Ready beads exist, launch an agent
                 println!("Starting agent...");
-                match launch_agent_default(prompt_file) {
+                // Create abort callback that checks SHUTDOWN_REQUESTED
+                let abort_callback: AbortCallback = || {
+                    SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
+                };
+                match launch_agent_default(prompt_file, Some(abort_callback)) {
                     Ok(duration) => {
                         println!("Agent finished (duration: {})", format_duration(duration));
                     }
@@ -165,7 +192,11 @@ fn run_watch_loop(prompt_file: Option<&str>) {
             Ok(true) => {
                 // Ready beads exist, launch an agent
                 println!("Starting agent...");
-                match launch_agent_default(prompt_file) {
+                // Create abort callback that checks SHUTDOWN_REQUESTED
+                let abort_callback: AbortCallback = || {
+                    SHUTDOWN_REQUESTED.load(Ordering::SeqCst)
+                };
+                match launch_agent_default(prompt_file, Some(abort_callback)) {
                     Ok(duration) => {
                         println!("Agent finished (duration: {})", format_duration(duration));
                     }

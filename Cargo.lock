@@ -137,6 +137,7 @@ name = "otto"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "otto-agent-claude",
  "otto-beads",
  "otto-core",
  "signal-hook",

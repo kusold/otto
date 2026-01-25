@@ -7,4 +7,5 @@ edition.workspace = true
 clap.workspace = true
 otto-core = { path = "../otto-core" }
 otto-beads = { path = "../otto-beads" }
+otto-agent-claude = { path = "../otto-agent-claude" }
 signal-hook.workspace = true

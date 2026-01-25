@@ -9,7 +9,7 @@ use crate::color::print_progress;
 use otto_tmux::{ensure_otto_session, send_otto_command, TmuxError};
 use otto_agent_claude::{
     build_agent_prompt, get_prompt, is_claude_available, is_claude_process,
-    wait_for_claude_exit_with_progress, ClaudeError,
+    wait_for_claude_exit_with_progress, AbortCallback, ClaudeError,
 };
 
 /// Error type for agent operations.
@@ -104,6 +104,7 @@ const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 /// # Arguments
 /// * `timeout_secs` - Maximum time to wait for agent completion (None for default)
 /// * `prompt_file` - Optional path to a file containing the custom prompt
+/// * `abort_callback` - Optional callback that returns true if agent should be aborted
 ///
 /// # Returns
 /// - `Ok(duration)` if the agent completed successfully, where duration is the session length
@@ -113,7 +114,11 @@ const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 /// - `Err(AgentError::AgentTimeout)` if agent doesn't exit in time
 /// - `Err(AgentError::PromptFileError)` if prompt file cannot be read
 ///
-pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> AgentResult<std::time::Duration> {
+pub fn launch_agent(
+    timeout_secs: Option<u64>,
+    prompt_file: Option<&str>,
+    abort_callback: Option<AbortCallback>,
+) -> AgentResult<std::time::Duration> {
     let session_start = std::time::Instant::now();
 
     if !is_claude_available() {
@@ -144,7 +149,7 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
         // ensures we overwrite the previous line
     };
 
-    wait_for_claude_exit_with_progress(timeout, Some(progress_callback))?;
+    wait_for_claude_exit_with_progress(timeout, Some(progress_callback), abort_callback)?;
 
     // Clear the progress line when done
     eprint!("\r{}\r", " ".repeat(80));
@@ -159,12 +164,16 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
 ///
 /// # Arguments
 /// * `prompt_file` - Optional path to a file containing the custom prompt
+/// * `abort_callback` - Optional callback that returns true if agent should be aborted
 ///
 /// # Returns
 /// - `Ok(duration)` if the agent completed successfully, where duration is the session length
 /// - `Err` if there was an error
-pub fn launch_agent_default(prompt_file: Option<&str>) -> AgentResult<std::time::Duration> {
-    launch_agent(None, prompt_file)
+pub fn launch_agent_default(
+    prompt_file: Option<&str>,
+    abort_callback: Option<AbortCallback>,
+) -> AgentResult<std::time::Duration> {
+    launch_agent(None, prompt_file, abort_callback)
 }
 
 /// Checks if Claude is currently active in a specific tmux pane.
