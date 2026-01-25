@@ -7,9 +7,9 @@ pub mod color;
 
 use crate::color::print_progress;
 use otto_tmux::{
-    capture_pane, create_agent_window, ensure_otto_session, find_idle_ralph_window, get_pane_pid,
-    get_pane_spec, kill_window, list_windows_by_pattern, send_command_to_window, AGENT_WINDOW_PREFIX,
-    OTTO_SESSION_NAME, TmuxError,
+    capture_pane, ensure_otto_session, find_idle_ralph_window, get_or_create_agent_window,
+    get_pane_pid, get_pane_spec, kill_window, list_windows_by_pattern, send_command_to_window,
+    AGENT_WINDOW_PREFIX, OTTO_SESSION_NAME, TmuxError,
 };
 use otto_agent_claude::{
     build_agent_prompt, get_prompt, is_claude_available, is_claude_process, AbortCallback,
@@ -137,10 +137,7 @@ pub fn launch_agent(
     ensure_otto_session()?;
 
     // Try to find an idle ralph window to reuse, or create a new one
-    let window_name = match find_idle_ralph_window()? {
-        Some(idle_window) => idle_window,
-        None => create_agent_window(otto_tmux::OTTO_SESSION_NAME)?,
-    };
+    let window_name = get_or_create_agent_window(otto_tmux::OTTO_SESSION_NAME)?;
 
     // Get the prompt from file or use default
     let prompt = get_prompt(prompt_file)

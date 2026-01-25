@@ -10,6 +10,12 @@
 # This ensures that Claude only exits after completing the assigned task.
 
 set -uo pipefail
+# Save original stderr fd for error messages (used when blocking exit)
+exec 3>&2
+
+# Suppress stdout and stderr to prevent JSON/logs from appearing
+# But we can still write to fd 3 for critical error messages
+exec >/dev/null 2>&1
 
 # Read hook input from stdin (advanced stop hook API)
 HOOK_INPUT=$(cat 2>/dev/null || echo '{}')
@@ -70,6 +76,9 @@ if echo "$LAST_OUTPUT" | grep -q "<PLANE-HAS-LANDED>" 2>/dev/null; then
     exit 0
 fi
 
-# Task not complete - allow exit silently
-# No output to prevent JSON logs in conversation
-exit 0
+# Task not complete - BLOCK exit with non-zero code
+# Write to saved stderr (fd 3) to show error message
+echo "ERROR: Cannot exit - work is not complete!" >&3
+echo "ERROR: Last assistant message missing <PLANE-HAS-LANDED> marker" >&3
+echo "ERROR: Continue working until complete, then include <PLANE-HAS-LANDED>" >&3
+exit 1
