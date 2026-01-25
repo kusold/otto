@@ -136,6 +136,11 @@ pub fn is_claude_process(pid: u32) -> bool {
     }
 }
 
+/// Callback type for progress updates during agent wait.
+///
+/// The callback receives the elapsed duration as a parameter.
+pub type ProgressCallback = fn(std::time::Duration);
+
 /// Waits for Claude to exit within the specified timeout.
 ///
 /// Polls every 2 seconds to check if claude is still running.
@@ -147,6 +152,25 @@ pub fn is_claude_process(pid: u32) -> bool {
 /// - `Ok(())` if claude has exited
 /// - `Err(ClaudeError::ClaudeTimeout)` if timeout is reached
 pub fn wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()> {
+    wait_for_claude_exit_with_progress(timeout_secs, None)
+}
+
+/// Waits for Claude to exit within the specified timeout, with optional progress updates.
+///
+/// Polls every 2 seconds to check if claude is still running.
+/// If a progress callback is provided, it will be called every 2 seconds with the elapsed time.
+///
+/// # Arguments
+/// * `timeout_secs` - Maximum time to wait in seconds
+/// * `progress_callback` - Optional callback function for progress updates
+///
+/// # Returns
+/// - `Ok(())` if claude has exited
+/// - `Err(ClaudeError::ClaudeTimeout)` if timeout is reached
+pub fn wait_for_claude_exit_with_progress(
+    timeout_secs: u64,
+    progress_callback: Option<ProgressCallback>,
+) -> ClaudeResult<()> {
     let timeout = std::time::Duration::from_secs(timeout_secs);
     let start = std::time::Instant::now();
 
@@ -154,6 +178,12 @@ pub fn wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()> {
         if !is_claude_running() {
             return Ok(());
         }
+
+        // Call progress callback if provided
+        if let Some(callback) = progress_callback {
+            callback(start.elapsed());
+        }
+
         std::thread::sleep(std::time::Duration::from_secs(2));
     }
 

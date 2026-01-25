@@ -5,8 +5,8 @@
 
 use otto_tmux::{ensure_otto_session, send_otto_command, TmuxError};
 use otto_agent_claude::{
-    build_agent_prompt, get_prompt, is_claude_available, is_claude_process, wait_for_claude_exit,
-    ClaudeError,
+    build_agent_prompt, get_prompt, is_claude_available, is_claude_process,
+    wait_for_claude_exit_with_progress, ClaudeError,
 };
 
 /// Error type for agent operations.
@@ -59,6 +59,33 @@ impl From<ClaudeError> for AgentError {
 /// Result type for agent operations.
 pub type AgentResult<T> = Result<T, AgentError>;
 
+/// Formats a duration into a human-readable string.
+///
+/// Examples:
+/// - "1m 23s" for 83 seconds
+/// - "45s" for 45 seconds
+/// - "1h 5m 30s" for 3930 seconds
+fn format_duration(duration: std::time::Duration) -> String {
+    let total_secs = duration.as_secs();
+    let hours = total_secs / 3600;
+    let minutes = (total_secs % 3600) / 60;
+    let seconds = total_secs % 60;
+
+    let mut parts = Vec::new();
+
+    if hours > 0 {
+        parts.push(format!("{}h", hours));
+    }
+    if minutes > 0 {
+        parts.push(format!("{}m", minutes));
+    }
+    if seconds > 0 || parts.is_empty() {
+        parts.push(format!("{}s", seconds));
+    }
+
+    parts.join(" ")
+}
+
 /// Default timeout for agent completion (30 minutes).
 const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 
@@ -68,7 +95,8 @@ const DEFAULT_AGENT_TIMEOUT_SECS: u64 = 1800;
 /// 1. Ensures the otto tmux session exists
 /// 2. Sends the claude command with the fixed prompt to the session
 /// 3. Waits for the agent to complete by checking if the process is still running
-/// 4. Tracks and returns the session duration
+/// 4. Shows progress on stderr while waiting (continuously rewritten line with elapsed time)
+/// 5. Tracks and returns the session duration
 ///
 /// # Arguments
 /// * `timeout_secs` - Maximum time to wait for agent completion (None for default)
@@ -102,9 +130,18 @@ pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> Age
     // Send the command to the tmux session
     send_otto_command(&claude_command)?;
 
-    // Wait for the agent to complete
+    // Wait for the agent to complete with progress callback
     let timeout = timeout_secs.unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS);
-    wait_for_claude_exit(timeout)?;
+
+    // Define progress callback that updates stderr with elapsed time
+    let progress_callback = |elapsed: std::time::Duration| {
+        eprint!("\rAgent working... ({})", format_duration(elapsed));
+    };
+
+    wait_for_claude_exit_with_progress(timeout, Some(progress_callback))?;
+
+    // Clear the progress line when done
+    eprint!("\r{}\r", " ".repeat(80));
 
     Ok(session_start.elapsed())
 }
