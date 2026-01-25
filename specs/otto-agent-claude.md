@@ -137,13 +137,15 @@ Check if any Claude Code process is currently running.
 ```rust
 pub fn is_claude_running() -> bool {
     Command::new("pgrep")
-        .arg("-f")
+        .arg("-x")
         .arg("claude")
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
 ```
+
+**Note:** Uses `-x` flag for exact process name matching (more precise than `-f`).
 
 #### `wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()>`
 
@@ -177,6 +179,8 @@ pub fn wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()> {
 
 Build a Claude Code command with the given prompt.
 
+The agent runs in interactive mode and exits when the stop hook detects the `<PLANE-HAS-LANDED>` marker in the output. This provides full interactivity while ensuring clean exit after task completion.
+
 **Parameters:**
 - `prompt`: The prompt text to send to Claude
 
@@ -186,7 +190,7 @@ Build a Claude Code command with the given prompt.
 **Example:**
 ```rust
 let cmd = build_agent_prompt("Run tests");
-// Returns: "claude --dangerously-skip-permissions --print \"Run tests\""
+// Returns: "claude --dangerously-skip-permissions 'Run tests'"
 ```
 
 #### `get_prompt(prompt_file: Option<&str>) -> Result<String, std::io::Error>`
@@ -200,6 +204,94 @@ Read a prompt from a file, or return the default prompt.
 - `Ok(String)` - The prompt (from file or default)
 - `Err(std::io::Error)` - File read error
 
+#### `is_claude_process(pid: u32) -> bool`
+
+Check if a specific process ID is a Claude process.
+
+Validates whether a given PID corresponds to a running Claude Code CLI process by checking the process command line via `/proc/<pid>/cmdline`.
+
+**Parameters:**
+- `pid`: The process ID to check
+
+**Returns:**
+- `true` - The PID exists and is a claude process
+- `false` - Otherwise
+
+**Implementation:**
+```rust
+pub fn is_claude_process(pid: u32) -> bool {
+    let cmdline_path = format!("/proc/{}/cmdline", pid);
+    match std::fs::read_to_string(&cmdline_path) {
+        Ok(cmdline) => {
+            let command = cmdline.replace('\0', " ");
+            command.contains("claude")
+        }
+        Err(_) => false,
+    }
+}
+```
+
+**Note:** Linux/Unix specific (requires procfs).
+
+#### `wait_for_claude_exit_with_progress(timeout_secs: u64, progress_callback: Option<ProgressCallback>, abort_callback: Option<AbortCallback>) -> ClaudeResult<()>`
+
+Extended version of `wait_for_claude_exit` with callback support.
+
+Polls every 2 seconds to check if claude is still running. If a progress callback is provided, it will be called every 2 seconds with the elapsed time. If an abort callback is provided and returns true, claude will be killed and the function returns Ok.
+
+**Parameters:**
+- `timeout_secs`: Maximum time to wait in seconds
+- `progress_callback`: Optional callback for progress updates (receives elapsed Duration)
+- `abort_callback`: Optional callback that returns true if wait should be aborted
+
+**Returns:**
+- `Ok(())` - Claude exited (or was aborted via callback)
+- `Err(ClaudeError::ClaudeTimeout)` - Timeout reached
+
+#### `kill_claude() -> bool`
+
+Kills all running Claude processes immediately.
+
+Uses `pkill` to terminate all claude processes. This is a forceful termination intended for emergency shutdown scenarios or abort callbacks.
+
+**Returns:**
+- `true` - Any claude processes were killed
+- `false` - No claude processes were running
+
+**Implementation:**
+```rust
+pub fn kill_claude() -> bool {
+    Command::new("pkill")
+        .arg("-x")
+        .arg("claude")
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+```
+
+## Callback Types
+
+### `ProgressCallback`
+
+Type alias for progress callback functions during agent wait.
+
+```rust
+pub type ProgressCallback = fn(std::time::Duration);
+```
+
+The callback receives the elapsed duration as a parameter, allowing callers to display progress or log waiting time.
+
+### `AbortCallback`
+
+Type alias for abort checking functions during agent wait.
+
+```rust
+pub type AbortCallback = fn() -> bool;
+```
+
+The callback returns true if the wait should be aborted. When aborted, `kill_claude()` is called to terminate the agent.
+
 ## Constants
 
 ### `OTTO_AGENT_PROMPT`
@@ -208,10 +300,10 @@ The default prompt used by Otto agents:
 
 ```rust
 pub const OTTO_AGENT_PROMPT: &str =
-    "Run bd ready, choose a bead, begin work on only that bead. Exit when done.";
+    "Run bd ready, choose a bead, begin work on only that bead. When done, output <PLANE-HAS-LANDED> and then exit. Land the plane.";
 ```
 
-**Purpose:** This is the fixed prompt sent to all autonomous agents, ensuring consistent behavior across agent launches.
+**Purpose:** This is the fixed prompt sent to all autonomous agents, ensuring consistent behavior across agent launches. The prompt instructs agents to output the `<PLANE-HAS-LANDED>` marker when complete, which is detected by the stop hook to allow clean exit.
 
 ## Technical Implementation Details
 
@@ -231,11 +323,21 @@ The crate interacts with these system commands:
 - **Success Criteria:** Exit code 0
 - **Output Parsing:** Extract version from stdout
 
-#### 2. `pgrep -f claude`
-- **Purpose:** Check for running Claude processes
-- **Usage:** `Command::new("pgrep").arg("-f").arg("claude").output()`
+#### 2. `pgrep -x claude`
+- **Purpose:** Check for running Claude processes (exact name match)
+- **Usage:** `Command::new("pgrep").arg("-x").arg("claude").output()`
 - **Success Criteria:** Exit code 0 means process found
 - **Interpretation:** Exit code 1 means no process running
+
+#### 3. `pkill -x claude`
+- **Purpose:** Kill all running Claude processes
+- **Usage:** `Command::new("pkill").arg("-x").arg("claude").output()`
+- **Success Criteria:** Exit code 0 means processes were killed
+
+#### 4. `/proc/<pid>/cmdline`
+- **Purpose:** Read process command line to verify if it's a Claude process
+- **Usage:** `std::fs::read_to_string(format!("/proc/{}/cmdline", pid))`
+- **Platform:** Linux/Unix only (procfs required)
 
 ### Process Monitoring Strategy
 
@@ -263,15 +365,23 @@ The crate uses polling-based process monitoring:
 
 ### Shell Escaping
 
-Command construction includes the `--dangerously-skip-permissions` flag:
+Command construction uses POSIX shell escaping via `escape_shell_arg`:
 
 ```rust
+fn escape_shell_arg(s: &str) -> String {
+    // Simple POSIX shell escaping: wrap in single quotes and escape single quotes
+    format!("'{}", s.replace('\'', "'\\''"))
+}
+
 pub fn build_agent_prompt(prompt: &str) -> String {
-    format!("claude --dangerously-skip-permissions --print \"{}\"", prompt)
+    format!(
+        "claude --dangerously-skip-permissions {}",
+        escape_shell_arg(prompt)
+    )
 }
 ```
 
-**Note:** This uses basic escaping. For production use with untrusted input, consider using the `shlex` crate for robust shell escaping.
+**Note:** The escaping wraps the prompt in single quotes and escapes any embedded single quotes with `'\''`. This is sufficient for trusted prompts. For production use with untrusted input, consider using the `shlex` crate for more robust shell escaping.
 
 ## Integration with Otto Ecosystem
 
@@ -310,29 +420,12 @@ From `/home/mike/Development/otto/crates/otto-core/src/lib.rs`:
 
 ```rust
 use otto_agent_claude::{
-    build_agent_prompt, get_prompt, is_claude_available, wait_for_claude_exit,
+    build_agent_prompt, get_prompt, is_claude_available, is_claude_process, AbortCallback,
     ClaudeError,
 };
-
-pub fn launch_agent(timeout_secs: Option<u64>, prompt_file: Option<&str>) -> AgentResult<()> {
-    if !is_claude_available() {
-        return Err(AgentError::ClaudeNotAvailable);
-    }
-
-    ensure_otto_session()?;
-
-    let prompt = get_prompt(prompt_file)
-        .map_err(|e| AgentError::PromptFileError(prompt_file.unwrap_or("default").to_string(), e))?;
-
-    let claude_command = build_agent_prompt(&prompt);
-    send_otto_command(&claude_command)?;
-
-    let timeout = timeout_secs.unwrap_or(DEFAULT_AGENT_TIMEOUT_SECS);
-    wait_for_claude_exit(timeout)?;
-
-    Ok(())
-}
 ```
+
+The actual implementation uses `is_claude_process` for PID validation and the callback-based `wait_for_claude_exit_with_progress` for agent monitoring with abort support.
 
 ## Testing Considerations
 
@@ -346,13 +439,15 @@ mod tests {
     #[test]
     fn test_otto_agent_prompt_constant() {
         assert!(OTTO_AGENT_PROMPT.contains("bd ready"));
-        assert!(OTTO_AGENT_PROMPT.contains("Exit when done"));
+        assert!(OTTO_AGENT_PROMPT.contains("<PLANE-HAS-LANDED>"));
     }
 
     #[test]
     fn test_build_agent_prompt() {
         let cmd = build_agent_prompt("test prompt");
         assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(!cmd.contains("--print"));  // Should NOT contain --print
+        assert!(!cmd.contains("--output-format"));  // Should NOT contain output-format
         assert!(cmd.contains("test prompt"));
     }
 
@@ -447,19 +542,22 @@ Integration tests would require Claude Code CLI to be installed:
 
 ### Command Injection
 
-The crate constructs shell commands:
+The crate constructs shell commands using POSIX shell escaping:
 
 ```rust
-format!("claude --dangerously-skip-permissions --print \"{}\"", prompt)
+fn escape_shell_arg(s: &str) -> String {
+    format!("'{}", s.replace('\'', "'\\''"))
+}
 ```
 
 **Risks:**
 - If input contains malicious shell metacharacters
-- Current escaping is basic (only quotes)
+- Current escaping uses single quotes with internal quote escaping
 
 **Mitigation:**
 - Otto uses fixed prompts (no user input)
-- Future: Use `shlex` crate for robust escaping
+- Single-quote escaping is reasonably robust for trusted input
+- Future: Use `shlex` crate for more comprehensive escaping
 - Document that commands should be trusted
 
 ### Process Permissions

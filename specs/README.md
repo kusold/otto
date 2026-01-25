@@ -89,7 +89,7 @@ flowchart TB
 3. [otto-core.md](./otto-core.md) - 708 lines
    - Agent orchestration, lifecycle management, coordination
 
-4. [otto-agent-claude.md](./otto-agent-claude.md) - TBD lines
+4. [otto-agent-claude.md](./otto-agent-claude.md) - 653 lines
    - Claude Code CLI integration, process monitoring, command construction
 
 5. [otto-beads.md](./otto-beads.md) - 267 lines
