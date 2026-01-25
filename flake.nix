@@ -47,7 +47,7 @@
         # Create the Rust package set from Cargo.nix
         rustPkgs = pkgsWithCargo2nix.rustBuilder.makePackageSet {
           rustChannel = "stable";
-          rustVersion = "2024-01-01";
+          rustVersion = "latest";
           packageFun = import ./Cargo.nix;
         };
       in {
@@ -58,6 +58,7 @@
             cargo
             rustc
             pkg-config
+            pre-commit
           ];
 
           RUST_SRC_PATH = "${pkgsWithOverlays.rustPlatform.rustLibSrc}";

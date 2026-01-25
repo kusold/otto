@@ -5,9 +5,9 @@ args@{
   release ? true,
   rootFeatures ? [
     "otto/default"
+    "otto-agent-claude/default"
     "otto-beads/default"
     "otto-core/default"
-    "otto-agent-claude/default"
     "otto-tmux/default"
   ],
   rustPackages,
@@ -29,7 +29,7 @@ args@{
   cargoConfig ? {},
 }:
 let
-  nixifiedLockHash = "070e14d1eec1744e9133447442eefd67f3b9dc6db8bafb483bb761927a041d5b";
+  nixifiedLockHash = "446f6f3d2008562c410585d9972b29fd5f3386cf7d3d8f390c581fc190ff23df";
   workspaceSrc = if args.workspaceSrc == null then ./. else args.workspaceSrc;
   currentLockHash = builtins.hashFile "sha256" (workspaceSrc + /Cargo.lock);
   lockHashIgnored = if ignoreLockHash
@@ -58,9 +58,9 @@ in
   cargo2nixVersion = "0.12.0";
   workspace = {
     otto = rustPackages.unknown.otto."0.1.0";
+    otto-agent-claude = rustPackages.unknown.otto-agent-claude."0.1.0";
     otto-beads = rustPackages.unknown.otto-beads."0.1.0";
     otto-core = rustPackages.unknown.otto-core."0.1.0";
-    otto-agent-claude = rustPackages.unknown.otto-agent-claude."0.1.0";
     otto-tmux = rustPackages.unknown.otto-tmux."0.1.0";
   };
   "registry+https://github.com/rust-lang/crates.io-index".anstream."0.6.21" = overridableMkRustCrate (profileName: rec {
@@ -263,6 +263,7 @@ in
     src = fetchCrateLocal workspaceSrc;
     dependencies = {
       clap = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".clap."4.5.54" { inherit profileName; }).out;
+      otto_agent_claude = (rustPackages."unknown".otto-agent-claude."0.1.0" { inherit profileName; }).out;
       otto_beads = (rustPackages."unknown".otto-beads."0.1.0" { inherit profileName; }).out;
       otto_core = (rustPackages."unknown".otto-core."0.1.0" { inherit profileName; }).out;
       signal_hook = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".signal-hook."0.3.18" { inherit profileName; }).out;
