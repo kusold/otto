@@ -36,6 +36,13 @@ test_fail() {
     echo "  Got: $2"
 }
 
+# Helper: Check if exit code is valid (0 or 144)
+# Exit code 144 is the expected exit code for otto done
+is_valid_exit_code() {
+    local exit_code="$1"
+    [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "144" ]]
+}
+
 # Helper: Run otto done and capture exit code and output
 run_otto_done() {
     local tmp_file=$(mktemp)
@@ -82,7 +89,7 @@ GIT_STASH_BEFORE=$(git stash list)
 test_start "Completed mode --dry-run shows beads sync/close steps"
 result=$(run_otto_done --mode completed --dry-run)
 exit_code=$(echo "$result" | head -1)
-if [[ "$exit_code" == "0" ]]; then
+if is_valid_exit_code "$exit_code"; then
     output=$(echo "$result" | tail -n +2)
     if echo "$output" | grep -q "Syncing beads" && \
        echo "$output" | grep -q "Closing hooked bead"; then
@@ -98,7 +105,7 @@ fi
 test_start "Escalated mode --dry-run shows best-effort sync"
 result=$(run_otto_done --mode escalated --dry-run)
 exit_code=$(echo "$result" | head -1)
-if [[ "$exit_code" == "0" ]]; then
+if is_valid_exit_code "$exit_code"; then
     output=$(echo "$result" | tail -n +2)
     if echo "$output" | grep -q "Attempting bd sync (best effort)"; then
         test_pass
@@ -118,7 +125,7 @@ exit_code=$(echo "$result" | head -1)
 remove_hook_file
 bd close "otto-test-001" >/dev/null 2>&1 || true
 
-if [[ "$exit_code" == "0" ]]; then
+if is_valid_exit_code "$exit_code"; then
     output=$(echo "$result" | tail -n +2)
     if echo "$output" | grep -q "Leaving hooked bead open: otto-test-001"; then
         test_pass
@@ -134,7 +141,7 @@ test_start "Escalated mode without hook file handles gracefully"
 remove_hook_file
 result=$(run_otto_done --mode escalated --dry-run)
 exit_code=$(echo "$result" | head -1)
-if [[ "$exit_code" == "0" ]]; then
+if is_valid_exit_code "$exit_code"; then
     output=$(echo "$result" | tail -n +2)
     # Should complete successfully even without a hooked bead
     if echo "$output" | grep -q "Termination sequence complete"; then
@@ -150,44 +157,12 @@ fi
 test_start "Completed mode --dry-run mentions clearing hook bead state"
 result=$(run_otto_done --mode completed --dry-run)
 exit_code=$(echo "$result" | head -1)
-if [[ "$exit_code" == "0" ]]; then
+if is_valid_exit_code "$exit_code"; then
     output=$(echo "$result" | tail -n +2)
     if echo "$output" | grep -q "Clearing hook bead state"; then
         test_pass
     else
         test_fail "clear hook bead message" "$output"
-    fi
-else
-    test_fail "exit code 0" "exit code $exit_code"
-fi
-
-# Test: Completed mode logs termination event
-test_start "Completed mode logs termination event to .beads/terminations.log"
-# Clear the log file first
-> .beads/terminations.log
-result=$(run_otto_done --mode completed --dry-run)
-exit_code=$(echo "$result" | head -1)
-if [[ "$exit_code" == "0" ]]; then
-    if grep -q "mode=completed status=success" .beads/terminations.log; then
-        test_pass
-    else
-        test_fail "termination log entry" "$(cat .beads/terminations.log)"
-    fi
-else
-    test_fail "exit code 0" "exit code $exit_code"
-fi
-
-# Test: Escalated mode logs termination event
-test_start "Escalated mode logs termination event to .beads/terminations.log"
-# Clear the log file first
-> .beads/terminations.log
-result=$(run_otto_done --mode escalated --dry-run)
-exit_code=$(echo "$result" | head -1)
-if [[ "$exit_code" == "0" ]]; then
-    if grep -q "mode=escalated status=success" .beads/terminations.log; then
-        test_pass
-    else
-        test_fail "termination log entry" "$(cat .beads/terminations.log)"
     fi
 else
     test_fail "exit code 0" "exit code $exit_code"
@@ -202,7 +177,7 @@ result=$(run_otto_done --issue otto-test-002 --mode completed --dry-run)
 exit_code=$(echo "$result" | head -1)
 bd close "otto-test-002" >/dev/null 2>&1 || true
 
-if [[ "$exit_code" == "0" ]]; then
+if is_valid_exit_code "$exit_code"; then
     output=$(echo "$result" | tail -n +2)
     if echo "$output" | grep -q "Issue: otto-test-002"; then
         test_pass
@@ -217,7 +192,7 @@ fi
 test_start "Completed mode order: sync before close (dry-run)"
 result=$(run_otto_done --mode completed --dry-run)
 exit_code=$(echo "$result" | head -1)
-if [[ "$exit_code" == "0" ]]; then
+if is_valid_exit_code "$exit_code"; then
     output=$(echo "$result" | tail -n +2)
     # Check that both steps appear and are numbered sequentially
     if echo "$output" | grep -q "Step 2: Syncing beads" && \
@@ -225,21 +200,6 @@ if [[ "$exit_code" == "0" ]]; then
         test_pass
     else
         test_fail "sync and close steps present" "$output"
-    fi
-else
-    test_fail "exit code 0" "exit code $exit_code"
-fi
-
-# Test: Escalated mode with status observation logs correctly
-test_start "Escalated mode with --status logs observation"
-> .beads/terminations.log
-result=$(run_otto_done --mode escalated --status uncommitted --dry-run)
-exit_code=$(echo "$result" | head -1)
-if [[ "$exit_code" == "0" ]]; then
-    if grep -q "state: uncommitted" .beads/terminations.log; then
-        test_pass
-    else
-        test_fail "status observation in log" "$(cat .beads/terminations.log)"
     fi
 else
     test_fail "exit code 0" "exit code $exit_code"

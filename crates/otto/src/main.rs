@@ -1202,7 +1202,6 @@ fn run_done_command(
         .map_err(|e| format!("Failed to get current directory: {}", e))?;
 
     // Paths
-    let log_file = project_root.join(".beads").join("terminations.log");
     let hook_file = project_root.join(".beads").join("hook");
 
     if mode == "completed" {
@@ -1295,10 +1294,7 @@ fn run_done_command(
             println!();
         }
 
-        // Step 6: Log completion event
-        log_termination_event(&log_file, "completed", "success", "git validation passed, beads synced, bead closed");
-
-        // Step 7: Exit Claude cleanly
+        // Step 6: Exit Claude cleanly
         if dry_run {
             println!("Step 6: [DRY RUN] Would exit Claude cleanly");
         } else {
@@ -1346,22 +1342,7 @@ fn run_done_command(
             println!("  No hooked bead detected");
         }
 
-        // Step 4: Log escalation event
-        let msg = format!(
-            "escalated with state: {}{}",
-            status_observation.as_deref().unwrap_or("unknown"),
-            if hooked_bead_id.is_some() {
-                format!(
-                    ", bead {} left open",
-                    hooked_bead_id.as_ref().unwrap()
-                )
-            } else {
-                String::new()
-            }
-        );
-        log_termination_event(&log_file, "escalated", "success", &msg);
-
-        // Step 5: Exit Claude cleanly
+        // Step 4: Exit Claude cleanly
         if dry_run {
             println!("Step 4: [DRY RUN] Would exit Claude cleanly");
         } else {
@@ -1734,48 +1715,6 @@ fn nuke_workspace_helper(
 
     println!("✓ Workspace cleanup complete");
     Ok(())
-}
-
-/// Log termination events to .beads/terminations.log.
-///
-/// # Arguments
-/// * `log_file` - Path to the terminations.log file
-/// * `mode` - Exit mode ("completed" or "escalated")
-/// * `status` - Status ("success" or "failed")
-/// * `message` - Additional message to log
-fn log_termination_event(log_file: &Path, mode: &str, status: &str, message: &str) {
-    use std::fs;
-
-    // Create log directory if it doesn't exist
-    if let Some(parent) = log_file.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-
-    // Get timestamp
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
-
-    // Get issue ID from environment or detect
-    let issue_id = std::env::var("BEAD_ID").unwrap_or_else(|_| String::from("none"));
-
-    // Log entry: timestamp | mode | status | issue_id | message
-    let log_entry = format!(
-        "[{}] mode={} status={} issue={} {}\n",
-        timestamp, mode, status, issue_id, message
-    );
-
-    // Append to log file
-    let _ = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log_file)
-        .and_then(|mut file| {
-            use std::io::Write;
-            file.write_all(log_entry.as_bytes())
-        });
 }
 
 /// Exit Claude Code by sending SIGTERM to parent process.

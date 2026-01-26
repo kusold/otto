@@ -136,7 +136,6 @@ otto done --mode escalated --status unpushed      # Committed but not pushed
 📝 **Always provide context**:
 - Use `--status` to indicate git state
 - The issue should describe what blocked you
-- Check `.beads/terminations.log` for escalation history
 
 ### Troubleshooting
 
@@ -164,7 +163,6 @@ This usually means Claude is waiting for something. Check:
 Solution:
 1. Check terminal for any prompts
 2. Try Ctrl+C to interrupt, then retry `otto done`
-3. If persistent, check `.beads/terminations.log` for clues
 
 **Problem: Need to resume after escalation**
 
@@ -183,22 +181,6 @@ When you escalate, the bead stays open and hook state is preserved:
    ```bash
    otto done    # Normal completion when work is actually done
    ```
-
-## Debugging
-
-The `otto done` command includes built-in debugging support.
-
-**Enable debug mode:**
-```bash
-OTTO_DEBUG=1 otto done
-```
-
-**View termination history:**
-```bash
-cat .beads/terminations.log
-```
-
-This shows all termination events with timestamps, modes, and outcomes.
 
 ## Workspace Isolation
 
