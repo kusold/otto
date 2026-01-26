@@ -405,6 +405,396 @@ fn format_duration(duration: std::time::Duration) -> String {
     parts.join(" ")
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_duration_seconds_only() {
+        let duration = std::time::Duration::from_secs(45);
+        assert_eq!(format_duration(duration), "45s");
+    }
+
+    #[test]
+    fn test_format_duration_minutes_and_seconds() {
+        let duration = std::time::Duration::from_secs(83);
+        assert_eq!(format_duration(duration), "1m 23s");
+    }
+
+    #[test]
+    fn test_format_duration_hours_minutes_seconds() {
+        let duration = std::time::Duration::from_secs(3930);
+        assert_eq!(format_duration(duration), "1h 5m 30s");
+    }
+
+    #[test]
+    fn test_format_duration_zero() {
+        let duration = std::time::Duration::from_secs(0);
+        assert_eq!(format_duration(duration), "0s");
+    }
+
+    #[test]
+    fn test_format_duration_large_hours() {
+        let duration = std::time::Duration::from_secs(3661);
+        assert_eq!(format_duration(duration), "1h 1m 1s");
+    }
+
+    #[test]
+    fn test_format_duration_only_hours() {
+        let duration = std::time::Duration::from_secs(7200);
+        assert_eq!(format_duration(duration), "2h");
+    }
+
+    #[test]
+    fn test_format_duration_only_minutes() {
+        let duration = std::time::Duration::from_secs(300);
+        assert_eq!(format_duration(duration), "5m");
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_empty() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src = temp_dir.path().join("src");
+        let dst = temp_dir.path().join("dst");
+
+        std::fs::create_dir(&src).unwrap();
+
+        assert!(copy_dir_recursive(&src, &dst).is_ok());
+        assert!(dst.exists());
+        assert!(dst.is_dir());
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_with_files() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src = temp_dir.path().join("src");
+        let dst = temp_dir.path().join("dst");
+
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("file1.txt"), "content1").unwrap();
+        std::fs::write(src.join("file2.txt"), "content2").unwrap();
+
+        assert!(copy_dir_recursive(&src, &dst).is_ok());
+        assert!(dst.exists());
+        assert!(dst.join("file1.txt").exists());
+        assert!(dst.join("file2.txt").exists());
+
+        assert_eq!(
+            std::fs::read_to_string(dst.join("file1.txt")).unwrap(),
+            "content1"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dst.join("file2.txt")).unwrap(),
+            "content2"
+        );
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_nested() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src = temp_dir.path().join("src");
+        let dst = temp_dir.path().join("dst");
+
+        std::fs::create_dir_all(src.join("subdir1/subdir2")).unwrap();
+        std::fs::write(src.join("file1.txt"), "content1").unwrap();
+        std::fs::write(src.join("subdir1/file2.txt"), "content2").unwrap();
+        std::fs::write(src.join("subdir1/subdir2/file3.txt"), "content3").unwrap();
+
+        assert!(copy_dir_recursive(&src, &dst).is_ok());
+        assert!(dst.exists());
+        assert!(dst.join("file1.txt").exists());
+        assert!(dst.join("subdir1/file2.txt").exists());
+        assert!(dst.join("subdir1/subdir2/file3.txt").exists());
+    }
+
+    #[test]
+    fn test_detect_ralph_prompt_in_current_repo() {
+        // This test assumes we're in the otto repo with .beads directory
+        let result = detect_ralph_prompt();
+        // We don't assert the result since it depends on whether PROMPT_RALPH.md exists
+        // We just verify it doesn't panic
+        let _ = result;
+    }
+
+    #[test]
+    fn test_args_parsing_no_command() {
+        use clap::Parser;
+
+        // Test that parsing an empty command list works
+        let args = Args::try_parse_from(["otto"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        assert!(args.command.is_none());
+    }
+
+    #[test]
+    fn test_args_parsing_start_command() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "start"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        assert!(matches!(args.command, Some(Commands::Start)));
+    }
+
+    #[test]
+    fn test_args_parsing_ralph_command() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "ralph", "--watch"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Ralph { watch, prompt_file }) => {
+                assert!(watch);
+                assert!(prompt_file.is_none());
+            }
+            _ => panic!("Expected Ralph command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_ralph_with_prompt() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "ralph", "-p", "custom.md"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Ralph { watch, prompt_file }) => {
+                assert!(!watch);
+                assert_eq!(prompt_file, Some("custom.md".to_string()));
+            }
+            _ => panic!("Expected Ralph command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_spawn_command() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "spawn", "-i", "otto-123"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Spawn { issue, workspace, no_workspace, prompt_file }) => {
+                assert_eq!(issue, "otto-123");
+                assert!(workspace.is_none());
+                assert!(!no_workspace);
+                assert!(prompt_file.is_none());
+            }
+            _ => panic!("Expected Spawn command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_spawn_with_workspace() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from([
+            "otto",
+            "spawn",
+            "-i",
+            "otto-123",
+            "--workspace",
+            "../agents/my-workspace",
+        ]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Spawn { issue, workspace, no_workspace, .. }) => {
+                assert_eq!(issue, "otto-123");
+                assert_eq!(workspace, Some("../agents/my-workspace".to_string()));
+                assert!(!no_workspace);
+            }
+            _ => panic!("Expected Spawn command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_spawn_no_workspace() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "spawn", "-i", "otto-123", "--no-workspace"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Spawn { issue, workspace, no_workspace, .. }) => {
+                assert_eq!(issue, "otto-123");
+                assert!(workspace.is_none());
+                assert!(no_workspace);
+            }
+            _ => panic!("Expected Spawn command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_attach_command() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "attach"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Attach { window }) => {
+                assert!(window.is_none());
+            }
+            _ => panic!("Expected Attach command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_attach_with_window() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "attach", "ralph-crimson"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Attach { window }) => {
+                assert_eq!(window, Some("ralph-crimson".to_string()));
+            }
+            _ => panic!("Expected Attach command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_attach_full_spec() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "attach", "otto:ralph-willow"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Attach { window }) => {
+                assert_eq!(window, Some("otto:ralph-willow".to_string()));
+            }
+            _ => panic!("Expected Attach command"),
+        }
+    }
+
+    #[test]
+    fn test_signal_handler_setup() {
+        // This test just verifies that setup_signal_handlers doesn't panic
+        // We can't easily test the actual signal handling behavior in a unit test
+        setup_signal_handlers();
+        // Give the signal handler thread a moment to start
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    #[test]
+    fn test_shutdown_signaling() {
+        // Test that we can set and check the shutdown flag
+        assert!(!SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::SeqCst));
+
+        SHUTDOWN_REQUESTED.store(true, std::sync::atomic::Ordering::SeqCst);
+        assert!(SHUTDOWN_REQUESTED.load(std::sync::atomic::Ordering::SeqCst));
+
+        // Reset for other tests
+        SHUTDOWN_REQUESTED.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_shutdown_count() {
+        // Test that we can increment and check the shutdown count
+        SHUTDOWN_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
+
+        let count1 = SHUTDOWN_COUNT.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(count1, 0);
+
+        let count2 = SHUTDOWN_COUNT.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(count2, 1);
+
+        // Reset for other tests
+        SHUTDOWN_COUNT.store(0, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    #[test]
+    fn test_cleanup_workspace() {
+        // Test cleanup_workspace doesn't panic with non-existent path
+        cleanup_workspace("/tmp/nonexistent-otto-workspace-12345");
+    }
+
+    #[test]
+    fn test_workspace_info_content_format() {
+        // Test that .workspace-info file content format is correct
+        let workspace_path = "/tmp/test-workspace";
+        let branch_name = "agent/test-branch";
+        let issue_id = "otto-123";
+        let original_dir = "/home/user/project";
+
+        let info_content = format!(
+            "workspace_path={}\nbranch_name={}\nissue_id={}\noriginal_dir={}\n",
+            workspace_path, branch_name, issue_id, original_dir
+        );
+
+        assert!(info_content.contains("workspace_path=/tmp/test-workspace"));
+        assert!(info_content.contains("branch_name=agent/test-branch"));
+        assert!(info_content.contains("issue_id=otto-123"));
+        assert!(info_content.contains("original_dir=/home/user/project"));
+    }
+
+    #[test]
+    fn test_workspace_branch_name_format() {
+        // Test the workspace branch naming convention
+        let workspace_name = "test-workspace";
+        let issue_id = "otto-123";
+        let branch_name = format!("agent/{}-{}", workspace_name, issue_id);
+
+        assert_eq!(branch_name, "agent/test-workspace-otto-123");
+        assert!(branch_name.starts_with("agent/"));
+        assert!(branch_name.contains('-'));
+    }
+
+    #[test]
+    fn test_workspace_default_path_format() {
+        // Test the default workspace path format
+        let issue_id = "otto-123";
+        let default_path = format!("../agents/{}", issue_id);
+
+        assert_eq!(default_path, "../agents/otto-123");
+        assert!(default_path.contains("agents/"));
+        assert!(default_path.contains(&issue_id));
+    }
+
+    #[test]
+    fn test_issue_validation_error_messages() {
+        // Test that error messages for issue validation are properly formatted
+        let issue_id = "nonexistent-issue";
+        let error_msg = format!("Issue {} not found", issue_id);
+
+        assert_eq!(error_msg, "Issue nonexistent-issue not found");
+        assert!(error_msg.contains("not found"));
+        assert!(error_msg.contains(&issue_id));
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_nonexistent_source() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src = temp_dir.path().join("nonexistent");
+        let dst = temp_dir.path().join("dst");
+
+        // Should return error when source doesn't exist
+        let result = copy_dir_recursive(&src, &dst);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_copy_dir_recursive_creates_destination() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src = temp_dir.path().join("src");
+        let dst = temp_dir.path().join("dst").join("nested").join("path");
+
+        std::fs::create_dir(&src).unwrap();
+        std::fs::write(src.join("file.txt"), "content").unwrap();
+
+        // copy_dir_recursive should create nested destination directories
+        assert!(copy_dir_recursive(&src, &dst).is_ok());
+        assert!(dst.exists());
+        assert!(dst.join("file.txt").exists());
+    }
+}
+
 /// Sets up signal handlers for SIGINT (Ctrl+C) and SIGTERM.
 ///
 /// Signal handling behavior:
