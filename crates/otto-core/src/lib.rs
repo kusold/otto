@@ -309,6 +309,26 @@ pub fn wait_for_claude_in_pane_with_progress(
     let timeout = std::time::Duration::from_secs(timeout_secs);
     let start = std::time::Instant::now();
 
+    // Phase 1: Wait for Claude to START (become active)
+    // Give Claude up to 10 seconds to start
+    let startup_timeout = std::time::Duration::from_secs(10);
+    let startup_start = std::time::Instant::now();
+
+    while startup_start.elapsed() < startup_timeout {
+        if is_claude_active_in_pane(Some(pane_spec))? {
+            break; // Claude has started
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    // Verify Claude actually started
+    if !is_claude_active_in_pane(Some(pane_spec))? {
+        // Claude never started - this might be okay if it exited very quickly
+        // or if there was an error. Return success to avoid blocking.
+        return Ok(());
+    }
+
+    // Phase 2: Wait for Claude to STOP (become inactive)
     while start.elapsed() < timeout {
         if !is_claude_active_in_pane(Some(pane_spec))? {
             return Ok(());
