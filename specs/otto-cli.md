@@ -134,6 +134,57 @@ When disabled (default):
 - Explicit `-p` flag always takes precedence over auto-detection
 - Useful for testing different prompts or specialized workflows
 
+#### `spawn`
+**Purpose**: Spawn a single agent for a specific issue with optional workspace isolation
+
+**Subcommand Arguments**:
+
+##### `--issue` / `-i` (required)
+**Type**: String
+**Description**: Issue ID to spawn an agent for
+
+**Behavior**:
+- Specifies which issue the agent should work on
+- Must be a valid beads issue ID (e.g., "otto-123")
+- Validates the issue exists before spawning
+
+##### `--workspace` / `-w`
+**Type**: String path
+**Default**: None (defaults to `../agents/<issue-id>`)
+**Description**: Workspace path for isolated git worktree
+
+**Behavior**:
+- Creates a git worktree at the specified path for isolated agent work
+- Workspace will be on a unique branch named `agent/<workspace-name>-<issue-id>`
+- Copies `.beads` config to workspace
+- Sets `OTTO_WORKSPACE` environment variable for the agent
+- Creates `.workspace-info` file with metadata (path, branch, issue ID, original directory)
+- If not specified, defaults to `../agents/<issue-id>`
+
+**Workspace Setup**:
+- Creates unique branch: `agent/<workspace-name>-<issue-id>`
+- Copies `.beads/` directory to workspace
+- Sets `OTTO_WORKSPACE` environment variable
+- Creates `.workspace-info` file with metadata
+- Agent runs in isolated tmux window
+- Workspace can be cleaned up with `git worktree remove <path>`
+
+**Error Handling**:
+- Fails if workspace path already exists
+- Fails if git worktree creation fails
+- Fails if issue ID is not found
+- Validates workspace is writable
+- Cleans up workspace on initialization failure
+
+##### `--prompt-file` / `-p`
+**Type**: String path
+**Default**: None (auto-detects PROMPT_RALPH.md, or uses OTTO_AGENT_PROMPT from otto-core)
+**Description**: Path to a custom prompt file for Claude Code agents
+
+**Behavior**:
+- Same as ralph command: auto-detects or uses default prompt
+- Explicit `-p` flag takes precedence over auto-detection
+
 #### `done` (via shell wrapper)
 **Purpose**: Agent self-termination command
 
@@ -187,6 +238,18 @@ otto ralph
 
 # Watch mode with custom prompt
 otto ralph --watch --prompt-file special-prompt.txt
+
+# Spawn agent for specific issue (default workspace path)
+otto spawn --issue otto-123
+
+# Spawn agent in custom workspace
+otto spawn --issue otto-123 --workspace ../agents/feature-x
+
+# Spawn agent with absolute workspace path
+otto spawn --issue otto-123 --workspace /tmp/agents/otto-123
+
+# Spawn agent with custom prompt
+otto spawn --issue otto-123 --prompt-file custom-prompt.txt
 
 # Run with no subcommand (shows help)
 otto
@@ -373,7 +436,7 @@ struct Args {
 ```
 **Purpose**: Holds top-level command-line arguments
 **Fields**:
-- `command`: Optional subcommand (start, attach, ralph)
+- `command`: Optional subcommand (start, attach, ralph, spawn)
 
 ### `Commands` Enum
 ```rust
@@ -382,6 +445,11 @@ enum Commands {
     Start,
     Attach { window: Option<String> },
     Ralph { watch: bool, prompt_file: Option<String> },
+    Spawn {
+        issue: String,
+        workspace: Option<String>,
+        prompt_file: Option<String>,
+    },
 }
 ```
 
@@ -428,7 +496,26 @@ The main crate uses error types from dependencies:
    - `start`: Execute `start_otto()`
    - `attach`: Execute `attach_to_window(window)`
    - `ralph`: Execute `run_single_pass()` or `run_watch_loop()`
+   - `spawn`: Execute `spawn_agent_for_issue(issue, workspace, prompt_file)`
    - None: Print help text
+
+#### Execution Phase
+
+**Spawn Mode (`spawn_agent_for_issue(issue_id, workspace_path, prompt_file)`)**:
+```
+1. Validate issue exists with `bd show <issue_id>`
+2. Resolve workspace path (default: ../agents/<issue-id>)
+3. Check if workspace already exists (fail if yes)
+4. Create unique branch name: agent/<workspace-name>-<issue-id>
+5. Create git worktree: `git worktree add <workspace-path> -b <branch-name>`
+6. Copy .beads config to workspace
+7. Create .workspace-info file with metadata
+8. Set OTTO_WORKSPACE environment variable
+9. Get or create agent tmux window
+10. Construct command: cd <workspace-path> && otto ralph
+11. Send command to tmux window
+12. Print success message with workspace path, branch, and window name
+```
 
 #### Execution Phase
 
