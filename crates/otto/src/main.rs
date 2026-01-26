@@ -147,6 +147,12 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+
+    /// Pre-flight check validation
+    ///
+    /// Validates the environment is properly configured for agents to work.
+    /// This should be called before starting work to ensure everything is ready.
+    PreFlightCheck,
 }
 
 /// Detects if PROMPT_RALPH.md exists in the repository root.
@@ -934,6 +940,19 @@ mod tests {
             _ => panic!("Expected Done command"),
         }
     }
+
+    #[test]
+    fn test_args_parsing_pre_flight_check() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "pre-flight-check"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::PreFlightCheck) => {}
+            _ => panic!("Expected PreFlightCheck command"),
+        }
+    }
 }
 
 /// Run the otto done command for agent self-termination.
@@ -1680,6 +1699,153 @@ fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
     }
 }
 
+/// Run pre-flight check validation.
+///
+/// Validates the environment is properly configured for agents to work.
+/// Checks:
+/// 1. Git repository status
+/// 2. Beads initialization
+/// 3. Beads sync status
+/// 4. Uncommitted changes
+/// 5. Unpushed commits
+///
+/// # Returns
+/// - `Ok(())` if all checks pass
+/// - `Err(String)` with error message if validation fails
+fn run_pre_flight_check() -> Result<(), String> {
+    use std::process::Command;
+
+    println!("Running otto pre-flight checks...");
+    println!();
+
+    let mut all_passed = true;
+
+    // Check 1: Git repository
+    println!("Check 1: Git repository...");
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            println!("  ✓ Git repository detected");
+        }
+        _ => {
+            println!("  ✗ Not a git repository");
+            all_passed = false;
+        }
+    }
+    println!();
+
+    // Get project root for .beads check
+    let project_root = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+    // Check 2: Beads initialized
+    println!("Check 2: Beads initialization...");
+    let beads_dir = project_root.join(".beads");
+    if beads_dir.is_dir() {
+        println!("  ✓ Beads initialized");
+    } else {
+        println!("  ✗ Beads not initialized (no .beads directory)");
+        println!("  Run 'bd init' to initialize beads");
+        all_passed = false;
+    }
+    println!();
+
+    // Check 3: Beads sync status (warning only, don't fail)
+    println!("Check 3: Beads sync status...");
+    let output = Command::new("bd")
+        .args(["sync", "--status"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            println!("  ✓ Beads sync status OK");
+        }
+        _ => {
+            println!("  ⚠ Beads sync may be needed");
+            println!("  Run 'bd sync' to synchronize with remote");
+            // Don't fail on this, just warn
+        }
+    }
+    println!();
+
+    // Check 4: Working tree clean
+    println!("Check 4: Working tree status...");
+    let output = Command::new("git")
+        .args(["diff", "--quiet"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {}
+        _ => {
+            println!("  ✗ Working tree has uncommitted changes");
+            println!("  Run 'git status' to see changes");
+            println!("  Commit or stash changes before starting work");
+            all_passed = false;
+        }
+    }
+
+    let output = Command::new("git")
+        .args(["diff", "--cached", "--quiet"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            println!("  ✓ Working tree is clean");
+        }
+        _ => {
+            println!("  ✗ Working tree has staged changes");
+            println!("  Run 'git status' to see changes");
+            println!("  Commit or stash changes before starting work");
+            all_passed = false;
+        }
+    }
+    println!();
+
+    // Check 5: Commits pushed
+    println!("Check 5: Commit push status...");
+    let branch = get_current_branch()?;
+    let main_branch = get_main_branch()?;
+
+    // Check for unpushed commits
+    let output = Command::new("git")
+        .args(["log", &format!("origin/{}..{}", main_branch, branch)])
+        .output();
+
+    match output {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.trim().is_empty() {
+                println!("  ✗ There are unpushed commits");
+                println!("  Run 'git push' to push commits");
+                all_passed = false;
+            } else {
+                println!("  ✓ All commits are pushed");
+            }
+        }
+        Err(e) => {
+            // If we can't check, log a warning but don't fail
+            println!("  ⚠ Could not check for unpushed commits: {}", e);
+        }
+    }
+    println!();
+
+    // Summary
+    if all_passed {
+        println!("✓ All pre-flight checks passed!");
+        println!();
+        println!("Environment is ready for agent work");
+        Ok(())
+    } else {
+        println!("✗ Some pre-flight checks failed");
+        println!();
+        println!("Please fix the issues above before starting work");
+        Err("Pre-flight checks failed".to_string())
+    }
+}
+
 /// Sets up signal handlers for SIGINT (Ctrl+C) and SIGTERM.
 ///
 /// Signal handling behavior:
@@ -1788,16 +1954,23 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Commands::PreFlightCheck) => {
+            if let Err(e) = run_pre_flight_check() {
+                print_error(&format!("otto pre-flight-check: {}", e));
+                std::process::exit(1);
+            }
+        }
         None => {
             // No subcommand provided, print help
             println!("Otto - Autonomous agent runner for beads tasks\n");
             println!("Usage: otto <COMMAND>\n");
             println!("Commands:");
-            println!("  start   Start otto in tmux (runs in background)");
-            println!("  attach  Attach to a tmux window");
-            println!("  ralph   Run the agent loop (default behavior)");
-            println!("  spawn   Spawn a single agent for a specific issue");
-            println!("  done    Agent self-termination with cleanup");
+            println!("  start            Start otto in tmux (runs in background)");
+            println!("  attach           Attach to a tmux window");
+            println!("  ralph            Run the agent loop (default behavior)");
+            println!("  spawn            Spawn a single agent for a specific issue");
+            println!("  done             Agent self-termination with cleanup");
+            println!("  pre-flight-check Validate environment before agent work");
             println!("\nFlags:");
             println!("  -h, --help     Print help");
             println!("  -V, --version  Print version");
@@ -1814,6 +1987,7 @@ fn main() {
             println!("                         Spawn agent in isolated workspace");
             println!("  otto done               Terminate with completed mode");
             println!("  otto done --mode escalated  Escalate (skip validation)");
+            println!("  otto pre-flight-check  Validate environment before starting work");
         }
     }
 }

@@ -352,6 +352,23 @@ mod tests {
     fn test_escape_shell_arg_with_special_chars() {
         assert_eq!(escape_shell_arg("hello$world"), "'hello$world'");
         assert_eq!(escape_shell_arg("hello;world"), "'hello;world'");
+        assert_eq!(escape_shell_arg("hello&world"), "'hello&world'");
+        assert_eq!(escape_shell_arg("hello|world"), "'hello|world'");
+        assert_eq!(escape_shell_arg("hello>world"), "'hello>world'");
+        assert_eq!(escape_shell_arg("hello<world"), "'hello<world'");
+        assert_eq!(escape_shell_arg("hello`world"), "'hello`world'");
+        assert_eq!(escape_shell_arg("hello\\world"), "'hello\\world'");
+        assert_eq!(escape_shell_arg("hello\nworld"), "'hello\nworld'");
+        assert_eq!(escape_shell_arg("hello\tworld"), "'hello\tworld'");
+        assert_eq!(escape_shell_arg("hello!world"), "'hello!world'");
+        assert_eq!(escape_shell_arg("hello*world"), "'hello*world'");
+        assert_eq!(escape_shell_arg("hello?world"), "'hello?world'");
+        assert_eq!(escape_shell_arg("hello[world"), "'hello[world'");
+        assert_eq!(escape_shell_arg("hello]world"), "'hello]world'");
+        assert_eq!(escape_shell_arg("hello{world"), "'hello{world'");
+        assert_eq!(escape_shell_arg("hello}world"), "'hello}world'");
+        assert_eq!(escape_shell_arg("hello(world"), "'hello(world'");
+        assert_eq!(escape_shell_arg("hello)world"), "'hello)world'");
     }
 
     // Tests for ClaudeError Display
@@ -483,5 +500,383 @@ mod tests {
         assert_eq!(result.unwrap(), "");
 
         std::fs::remove_file(&file_path).ok();
+    }
+
+    // Test for ClaudeError::error_source
+    #[test]
+    fn test_claude_error_implements_error() {
+        let err = ClaudeError::VersionError("test".to_string());
+        // Ensure the Error trait is implemented
+        let _err: &dyn std::error::Error = &err;
+    }
+
+    // Test for ClaudeError::Debug
+    #[test]
+    fn test_claude_error_debug_not_available() {
+        let err = ClaudeError::ClaudeNotAvailable;
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("ClaudeNotAvailable"));
+    }
+
+    #[test]
+    fn test_claude_error_debug_timeout() {
+        let err = ClaudeError::ClaudeTimeout;
+        let debug_str = format!("{:?}", err);
+        assert!(debug_str.contains("ClaudeTimeout"));
+    }
+
+    // Additional edge case tests for build_agent_prompt
+    #[test]
+    fn test_build_agent_prompt_with_tabs() {
+        let cmd = build_agent_prompt("test\twith\ttabs");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("test"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_carriage_return() {
+        let cmd = build_agent_prompt("test\rwith\rcarriage");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("test"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_null() {
+        let cmd = build_agent_prompt("test\u{0}null");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("test"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_very_long() {
+        let long_prompt = "a".repeat(10000);
+        let cmd = build_agent_prompt(&long_prompt);
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    // More get_prompt edge cases
+    #[test]
+    fn test_get_prompt_from_file_with_bom() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt-bom.txt");
+        // UTF-8 BOM + content
+        let prompt_content = "\u{FEFF}prompt with BOM\n";
+
+        std::fs::write(&file_path, prompt_content).unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        // BOM should be preserved
+        assert!(result.unwrap().starts_with("\u{FEFF}"));
+
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn test_get_prompt_from_file_with_only_newlines() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt-newlines.txt");
+        let prompt_content = "\n\n\n\n";
+
+        std::fs::write(&file_path, prompt_content).unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    // Test escape_shell_arg with more edge cases
+    #[test]
+    fn test_escape_shell_arg_with_all_special_chars() {
+        let input = "$`'\";|&<>()[]{}*?!~\\ \t\n";
+        let escaped = escape_shell_arg(input);
+        // Should be wrapped in single quotes
+        assert!(escaped.starts_with('\''));
+        assert!(escaped.ends_with('\''));
+    }
+
+    #[test]
+    fn test_escape_shell_arg_multiple_quotes_in_row() {
+        assert_eq!(escape_shell_arg("''"), "''\\'''\\'''");
+        // Let's just verify it doesn't panic and the result is wrapped in quotes
+        let result = escape_shell_arg("'a'b'c'");
+        assert!(result.starts_with('\''));
+        assert!(result.ends_with('\''));
+    }
+
+    // Test ClaudeError conversions
+    #[test]
+    fn test_claude_error_source_none() {
+        let err = ClaudeError::ClaudeNotAvailable;
+        // Error::source should return None for ClaudeNotAvailable
+        assert!(std::error::Error::source(&err).is_none());
+    }
+
+    #[test]
+    fn test_claude_error_timeout_source_none() {
+        let err = ClaudeError::ClaudeTimeout;
+        assert!(std::error::Error::source(&err).is_none());
+    }
+
+    // Test OTTO_AGENT_PROMPT constant more thoroughly
+    #[test]
+    fn test_otto_agent_prompt_structure() {
+        let prompt = OTTO_AGENT_PROMPT;
+        // Check it contains all key elements
+        assert!(prompt.contains("bd ready"));
+        assert!(prompt.contains("bead"));
+        assert!(prompt.contains("<PLANE-HAS-LANDED>"));
+        assert!(prompt.contains("exit"));
+        assert!(prompt.contains("Land the plane"));
+    }
+
+    // Additional tests to improve coverage
+
+    #[test]
+    fn test_build_agent_prompt_with_multiple_special_chars() {
+        // Test combination of special characters
+        let cmd = build_agent_prompt("test $pecial 'quoted' and \"double\" quoted");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("test"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_semicolon() {
+        let cmd = build_agent_prompt("command; another");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("command"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_ampersand() {
+        let cmd = build_agent_prompt("test & background");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_pipe() {
+        let cmd = build_agent_prompt("test | pipe");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_backtick() {
+        let cmd = build_agent_prompt("test`backtick`");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_parenthesis() {
+        let cmd = build_agent_prompt("test (parens)");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_brackets() {
+        let cmd = build_agent_prompt("test [brackets] and {braces}");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_wildcard() {
+        let cmd = build_agent_prompt("test *.txt");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_question_mark() {
+        let cmd = build_agent_prompt("test file?.txt");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_newline_sequence() {
+        let cmd = build_agent_prompt("line1\r\nline2\nline3");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_leading_trailing_spaces() {
+        let cmd = build_agent_prompt("  prompt  ");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        // The prompt should be preserved with spaces
+        assert!(cmd.contains("prompt"));
+    }
+
+    #[test]
+    fn test_get_prompt_from_file_with_only_bom() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt-bom-only.txt");
+        // UTF-8 BOM only
+        let prompt_content = "\u{FEFF}";
+
+        std::fs::write(&file_path, prompt_content).unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        // BOM should be preserved even with no other content
+        assert!(result.unwrap().starts_with("\u{FEFF}"));
+
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn test_get_prompt_from_file_with_mixed_line_endings() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt-mixed-newlines.txt");
+        let prompt_content = "line1\r\nline2\nline3\rline4";
+
+        std::fs::write(&file_path, prompt_content).unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        let content = result.unwrap();
+        assert!(content.contains("line1"));
+        assert!(content.contains("line2"));
+
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn test_get_prompt_from_file_with_utf8_content() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt-utf8.txt");
+        let prompt_content = "Test with UTF-8: 你好 世界 🎉\n";
+
+        std::fs::write(&file_path, prompt_content).unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("你好"));
+
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn test_get_prompt_from_file_preserves_internal_spaces() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt-spaces.txt");
+        let prompt_content = "  prompt   with   internal   spaces  \n";
+
+        std::fs::write(&file_path, prompt_content).unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        // Should trim only leading/trailing whitespace from the whole string
+        assert_eq!(result.unwrap(), "prompt   with   internal   spaces");
+
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_backslash() {
+        assert_eq!(escape_shell_arg("test\\file"), "'test\\file'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_exclamation() {
+        assert_eq!(escape_shell_arg("test!bang"), "'test!bang'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_tilde() {
+        assert_eq!(escape_shell_arg("~/path"), "'~/path'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_hash() {
+        assert_eq!(escape_shell_arg("test#comment"), "'test#comment'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_percent() {
+        assert_eq!(escape_shell_arg("test%var"), "'test%var'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_equals() {
+        assert_eq!(escape_shell_arg("test=value"), "'test=value'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_at() {
+        assert_eq!(escape_shell_arg("test@example"), "'test@example'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_plus() {
+        assert_eq!(escape_shell_arg("test+value"), "'test+value'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_underscore() {
+        assert_eq!(escape_shell_arg("test_value"), "'test_value'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_period() {
+        assert_eq!(escape_shell_arg("test.txt"), "'test.txt'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_comma() {
+        assert_eq!(escape_shell_arg("test,value"), "'test,value'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_colon() {
+        assert_eq!(escape_shell_arg("test:value"), "'test:value'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_semicolon() {
+        assert_eq!(escape_shell_arg("test;value"), "'test;value'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_slash() {
+        assert_eq!(escape_shell_arg("test/path"), "'test/path'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_dotdot() {
+        assert_eq!(escape_shell_arg("../test"), "'../test'");
+    }
+
+    #[test]
+    fn test_claude_error_display_messages() {
+        // Test that all error variants produce meaningful messages
+        let errors = vec![
+            ClaudeError::ClaudeNotAvailable,
+            ClaudeError::VersionError("test".to_string()),
+            ClaudeError::ClaudeStartFailed("test".to_string()),
+            ClaudeError::ClaudeTimeout,
+            ClaudeError::ClaudeExecutionFailed("test".to_string()),
+        ];
+
+        for error in errors {
+            let msg = format!("{}", error);
+            assert!(!msg.is_empty());
+            assert!(msg.len() > 10); // All messages should be reasonably descriptive
+        }
+    }
+
+    #[test]
+    fn test_claude_error_debug_formats() {
+        // Test Debug formatting for all error variants
+        let errors = vec![
+            ClaudeError::ClaudeNotAvailable,
+            ClaudeError::VersionError("test".to_string()),
+            ClaudeError::ClaudeStartFailed("test".to_string()),
+            ClaudeError::ClaudeTimeout,
+            ClaudeError::ClaudeExecutionFailed("test".to_string()),
+        ];
+
+        for error in errors {
+            let debug_str = format!("{:?}", error);
+            assert!(!debug_str.is_empty());
+        }
     }
 }

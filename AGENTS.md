@@ -79,6 +79,10 @@ This checks:
 
 If any check fails, fix the issues before proceeding with work.
 
+**Exit codes:**
+- `0` - All checks passed
+- `1` - One or more checks failed
+
 ## Session Termination: `otto done`
 
 The `otto done` command is the MANDATORY final step for session completion. It orchestrates all cleanup and validation.

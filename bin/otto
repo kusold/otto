@@ -78,11 +78,11 @@ main() {
     case "$command" in
         done)
             log_debug "Executing 'otto done' with args: $*"
-            exec otto done "$@"
+            exec "$PROJECT_ROOT/target/release/otto" done "$@"
             ;;
         pre-flight-check)
             log_debug "Executing 'otto pre-flight-check' with args: $*"
-            exec "$SCRIPT_DIR/otto-pre-flight-check.sh" "$@"
+            exec "$PROJECT_ROOT/target/release/otto" pre-flight-check "$@"
             ;;
         workspace)
             log_debug "Executing 'otto workspace' with args: $*"
