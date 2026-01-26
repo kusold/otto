@@ -78,7 +78,7 @@ main() {
     case "$command" in
         done)
             log_debug "Executing 'otto done' with args: $*"
-            exec "$SCRIPT_DIR/otto-done.sh" "$@"
+            exec otto done "$@"
             ;;
         pre-flight-check)
             log_debug "Executing 'otto pre-flight-check' with args: $*"

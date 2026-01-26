@@ -105,6 +105,48 @@ enum Commands {
         #[arg(long, short = 'p')]
         prompt_file: Option<String>,
     },
+
+    /// Agent self-termination command
+    ///
+    /// Orchestrates clean agent exit with validation, cleanup, and Claude shutdown.
+    /// This is the critical "land the plane" command that all agents must run when complete.
+    Done {
+        /// Exit mode: completed or escalated (default: completed)
+        ///
+        /// completed: Validate git state, push changes, sync beads, close hook, exit
+        /// escalated: Skip validation, preserve hook bead for recovery, exit
+        #[arg(long)]
+        mode: Option<String>,
+
+        /// Git state observation for escalated mode (optional)
+        ///
+        /// Records the observed git state when escalating:
+        ///   clean       - Working tree clean, all pushed
+        ///   uncommitted - Uncommitted changes present
+        ///   unpushed    - Committed but not pushed
+        #[arg(long)]
+        status: Option<String>,
+
+        /// Explicit issue ID (optional)
+        ///
+        /// If not provided, will attempt auto-detection from environment or beads state.
+        #[arg(long, short = 'i')]
+        issue: Option<String>,
+
+        /// Delete workspace after completion (completed mode only)
+        ///
+        /// Requires clean git state and confirmation (unless --yes flag).
+        #[arg(long)]
+        nuke: bool,
+
+        /// Skip confirmation prompts (for --nuke flag)
+        #[arg(long)]
+        yes: bool,
+
+        /// Show what would happen without executing
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Detects if PROMPT_RALPH.md exists in the repository root.
@@ -793,6 +835,849 @@ mod tests {
         assert!(dst.exists());
         assert!(dst.join("file.txt").exists());
     }
+
+    #[test]
+    fn test_args_parsing_done_command_completed() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "done"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Done { mode, status, issue, nuke, yes, dry_run }) => {
+                assert_eq!(mode, None);
+                assert_eq!(status, None);
+                assert_eq!(issue, None);
+                assert!(!nuke);
+                assert!(!yes);
+                assert!(!dry_run);
+            }
+            _ => panic!("Expected Done command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_done_command_escalated() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "done", "--mode", "escalated"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Done { mode, status, .. }) => {
+                assert_eq!(mode, Some("escalated".to_string()));
+            }
+            _ => panic!("Expected Done command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_done_command_with_status() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from([
+            "otto", "done", "--mode", "escalated", "--status", "uncommitted",
+        ]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Done { mode, status, .. }) => {
+                assert_eq!(mode, Some("escalated".to_string()));
+                assert_eq!(status, Some("uncommitted".to_string()));
+            }
+            _ => panic!("Expected Done command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_done_command_with_issue() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "done", "--issue", "otto-123"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Done { issue, .. }) => {
+                assert_eq!(issue, Some("otto-123".to_string()));
+            }
+            _ => panic!("Expected Done command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_done_command_nuke() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "done", "--nuke", "--yes"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Done { nuke, yes, .. }) => {
+                assert!(nuke);
+                assert!(yes);
+            }
+            _ => panic!("Expected Done command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_done_command_dry_run() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "done", "--dry-run"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Done { dry_run, .. }) => {
+                assert!(dry_run);
+            }
+            _ => panic!("Expected Done command"),
+        }
+    }
+}
+
+/// Run the otto done command for agent self-termination.
+///
+/// This function orchestrates clean agent exit with validation, cleanup, and Claude shutdown.
+/// It supports two modes:
+/// - completed: Full validation, close bead, clear state, exit
+/// - escalated: Skip validation, leave bead open, preserve state, exit
+///
+/// # Arguments
+/// * `mode` - Exit mode (Some("completed") or Some("escalated"))
+/// * `status_observation` - Git state observation for escalated mode
+/// * `issue_id` - Explicit issue ID (optional, will auto-detect if None)
+/// * `nuke_workspace` - Whether to delete workspace after completion
+/// * `yes_flag` - Skip confirmation prompts
+/// * `dry_run` - Show what would happen without executing
+///
+/// # Returns
+/// - `Ok(())` if termination sequence completes successfully
+/// - `Err(String)` if there was an error
+fn run_done_command(
+    mode: Option<String>,
+    status_observation: Option<String>,
+    issue_id: Option<String>,
+    nuke_workspace: bool,
+    yes_flag: bool,
+    dry_run: bool,
+) -> Result<(), String> {
+    use std::fs;
+    use std::process::Command;
+
+    // Parse and validate mode (default to "completed")
+    let mode = mode.as_deref().unwrap_or("completed");
+    if mode != "completed" && mode != "escalated" {
+        return Err(format!(
+            "Invalid mode: '{}' (must be 'completed' or 'escalated')",
+            mode
+        ));
+    }
+
+    // Validate: --status only allowed with --mode escalated
+    if status_observation.is_some() && mode != "escalated" {
+        return Err("--status option can only be used with --mode escalated".to_string());
+    }
+
+    // Validate: --nuke only allowed with --mode completed
+    if nuke_workspace && mode != "completed" {
+        return Err("--nuke option can only be used with --mode completed".to_string());
+    }
+
+    // Validate status observation value if provided
+    if let Some(ref status) = status_observation {
+        if status != "clean" && status != "uncommitted" && status != "unpushed" {
+            return Err(format!(
+                "Invalid status: '{}' (must be 'clean', 'uncommitted', or 'unpushed')",
+                status
+            ));
+        }
+    }
+
+    // Detect issue ID if not explicitly provided
+    let issue_id = if let Some(id) = issue_id {
+        id
+    } else {
+        detect_issue_id()?
+    };
+
+    // Log configuration
+    if dry_run {
+        println!("DRY RUN MODE - No changes will be made\n");
+    }
+    println!("Otto termination initiated");
+    println!("Mode: {}", mode);
+    if !issue_id.is_empty() {
+        println!("Issue: {}", issue_id);
+    }
+    println!();
+
+    // Get project root
+    let project_root = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+    // Paths
+    let log_file = project_root.join(".beads").join("terminations.log");
+    let hook_file = project_root.join(".beads").join("hook");
+
+    if mode == "completed" {
+        // Completed mode workflow
+        println!("Step 1: Validating git state...");
+
+        if dry_run {
+            println!("  [DRY RUN] Would validate git state (skipped in dry-run)");
+        } else {
+            // Validate git state
+            if let Err(e) = validate_git_state() {
+                println!();
+                return Err(format!("Git state validation failed: {}", e));
+            }
+            println!("✓ Git state validation passed");
+        }
+
+        // Step 2: Sync beads
+        println!("Step 2: Syncing beads...");
+        if dry_run {
+            println!("  [DRY RUN] Would run: bd sync");
+        } else {
+            let output = Command::new("bd")
+                .arg("sync")
+                .output();
+            match output {
+                Ok(output) if output.status.success() => {
+                    println!("✓ Beads synced");
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(format!("bd sync failed: {}", stderr));
+                }
+                Err(e) => {
+                    return Err(format!("Failed to run bd sync: {}", e));
+                }
+            }
+        }
+
+        // Step 3: Close hooked bead
+        println!("Step 3: Closing hooked bead (if any)...");
+        let hooked_bead_id = detect_hooked_bead(&hook_file)?;
+        if let Some(bead_id) = hooked_bead_id {
+            if dry_run {
+                println!("  [DRY RUN] Would run: bd close {}", bead_id);
+            } else {
+                let output = Command::new("bd")
+                    .args(["close", &bead_id, "--reason=Issue completed via otto done"])
+                    .output();
+                match output {
+                    Ok(output) if output.status.success() => {
+                        println!("✓ Closed hooked bead: {}", bead_id);
+                    }
+                    Ok(_) => {
+                        println!("⚠ Warning: Failed to close bead {} (continuing)", bead_id);
+                    }
+                    Err(_) => {
+                        println!("⚠ Warning: Failed to close bead {} (continuing)", bead_id);
+                    }
+                }
+            }
+        } else {
+            println!("  No hooked bead to close");
+        }
+
+        // Step 4: Clear hook bead state
+        println!("Step 4: Clearing hook bead state...");
+        if dry_run {
+            println!("  [DRY RUN] Would clear hook bead state");
+        } else {
+            if hook_file.exists() {
+                if fs::remove_file(&hook_file).is_ok() {
+                    println!("✓ Hook bead state cleared");
+                } else {
+                    println!("⚠ Warning: Failed to clear hook bead state (continuing)");
+                }
+            } else {
+                println!("  Hook file does not exist (nothing to clear)");
+            }
+        }
+
+        // Step 5: Nuke workspace (if --nuke flag)
+        if nuke_workspace {
+            println!("Step 5: Cleaning up workspace...");
+            if let Err(e) = nuke_workspace_helper(&project_root, yes_flag, dry_run) {
+                println!();
+                println!("⚠ Warning: Workspace cleanup failed: {}", e);
+                println!("Workspace cleanup is optional, but termination will continue");
+            }
+            println!();
+        }
+
+        // Step 6: Log completion event
+        log_termination_event(&log_file, "completed", "success", "git validation passed, beads synced, bead closed");
+
+        // Step 7: Exit Claude cleanly
+        if dry_run {
+            println!("Step 6: [DRY RUN] Would exit Claude cleanly");
+        } else {
+            println!("Step 6: Exiting Claude cleanly...");
+            if let Err(e) = exit_claude("completed", 5) {
+                println!("⚠ Warning: Claude exit encountered issues: {}", e);
+            } else {
+                println!("✓ Claude exit initiated");
+            }
+        }
+    } else {
+        // Escalated mode workflow
+        println!("Escalated mode workflow:");
+        println!("  ✓ Skip validation (escalated mode)");
+        println!(
+            "  ✓ Git state observation: {}",
+            status_observation.as_deref().unwrap_or("unknown")
+        );
+
+        // Step 2: Attempt bd sync (best effort)
+        println!("Step 2: Attempting bd sync (best effort)...");
+        if dry_run {
+            println!("  [DRY RUN] Would run: bd sync");
+        } else {
+            let output = Command::new("bd")
+                .arg("sync")
+                .output();
+            match output {
+                Ok(output) if output.status.success() => {
+                    println!("✓ Beads synced (best effort)");
+                }
+                _ => {
+                    println!("⚠ Warning: Beads sync failed (continuing anyway - escalated mode)");
+                }
+            }
+        }
+
+        // Step 3: Detect hooked bead for recovery
+        println!("Step 3: Detecting hooked bead for recovery...");
+        let hooked_bead_id = detect_hooked_bead(&hook_file)?;
+        if let Some(ref bead_id) = hooked_bead_id {
+            println!("  ✓ Leaving hooked bead open: {}", bead_id);
+            println!("  ✓ Run 'otto ralph {}' to resume work", bead_id);
+        } else {
+            println!("  No hooked bead detected");
+        }
+
+        // Step 4: Log escalation event
+        let msg = format!(
+            "escalated with state: {}{}",
+            status_observation.as_deref().unwrap_or("unknown"),
+            if hooked_bead_id.is_some() {
+                format!(
+                    ", bead {} left open",
+                    hooked_bead_id.as_ref().unwrap()
+                )
+            } else {
+                String::new()
+            }
+        );
+        log_termination_event(&log_file, "escalated", "success", &msg);
+
+        // Step 5: Exit Claude cleanly
+        if dry_run {
+            println!("Step 4: [DRY RUN] Would exit Claude cleanly");
+        } else {
+            println!("Step 4: Exiting Claude cleanly...");
+            if let Err(e) = exit_claude("escalated", 5) {
+                println!("⚠ Warning: Claude exit encountered issues: {}", e);
+            } else {
+                println!("✓ Claude exit initiated");
+            }
+        }
+    }
+
+    println!();
+    println!("✓ Termination sequence complete");
+
+    if dry_run {
+        println!();
+        println!("Dry run complete - no changes made");
+        println!("Exit mechanism would have been triggered");
+    }
+
+    Ok(())
+}
+
+/// Detect the currently hooked bead ID.
+///
+/// Checks OTTO_CURRENT_BEAD env var, then .beads/hook file.
+///
+/// # Arguments
+/// * `hook_file` - Path to the .beads/hook file
+///
+/// # Returns
+/// - `Ok(Some(bead_id))` if a hooked bead is found
+/// - `Ok(None)` if no hooked bead is found
+/// - `Err(String)` if there was an error reading the hook file
+fn detect_hooked_bead(hook_file: &Path) -> Result<Option<String>, String> {
+    use std::fs;
+
+    // Try OTTO_CURRENT_BEAD environment variable first
+    if let Ok(bead_id) = std::env::var("OTTO_CURRENT_BEAD") {
+        if !bead_id.is_empty() {
+            return Ok(Some(bead_id));
+        }
+    }
+
+    // Try reading from .beads/hook file
+    if hook_file.exists() {
+        let content = fs::read_to_string(hook_file)
+            .map_err(|e| format!("Failed to read hook file: {}", e))?;
+        let bead_id = content.trim();
+        if !bead_id.is_empty() {
+            return Ok(Some(bead_id.to_string()));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Auto-detect issue ID from environment or beads state.
+///
+/// # Returns
+/// - `Ok(issue_id)` - The detected issue ID (or empty string if none detected)
+/// - `Err(String)` if there was an error
+fn detect_issue_id() -> Result<String, String> {
+    use std::fs;
+
+    // Try BEAD_ID environment variable (set by agents)
+    if let Ok(bead_id) = std::env::var("BEAD_ID") {
+        if !bead_id.is_empty() {
+            return Ok(bead_id);
+        }
+    }
+
+    // Try to read from .beads issues.jsonl (most recent bead)
+    let project_root = std::env::current_dir()
+        .map_err(|e| format!("Failed to get current directory: {}", e))?;
+    let issues_file = project_root.join(".beads").join("issues.jsonl");
+
+    if issues_file.exists() {
+        // Read the last line (most recent issue)
+        let content = fs::read_to_string(&issues_file)
+            .map_err(|e| format!("Failed to read issues.jsonl: {}", e))?;
+
+        if let Some(last_line) = content.lines().last() {
+            // Parse JSON to extract the issue ID
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(last_line) {
+                if let Some(id) = json.get("id").and_then(|v| v.as_str()) {
+                    return Ok(id.to_string());
+                }
+            }
+        }
+    }
+
+    // No issue ID detected - return empty string (not an error)
+    Ok(String::new())
+}
+
+/// Validate git working directory state.
+///
+/// Checks:
+/// 1. Working tree is clean (no uncommitted changes)
+/// 2. All commits are pushed to remote
+/// 3. No git stashes
+///
+/// # Returns
+/// - `Ok(())` if all validations pass
+/// - `Err(String)` with error message if validation fails
+fn validate_git_state() -> Result<(), String> {
+    use std::process::Command;
+
+    // Check 1: Working tree clean
+    let output = Command::new("git")
+        .args(["diff", "--quiet"])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {}
+        _ => {
+            return Err("Working tree has uncommitted changes (run git status)".to_string());
+        }
+    }
+
+    let output = Command::new("git")
+        .args(["diff", "--cached", "--quiet"])
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {}
+        _ => {
+            return Err("Working tree has staged changes (run git status)".to_string());
+        }
+    }
+
+    // Check 2: All commits pushed
+    let branch = get_current_branch()?;
+    let main_branch = get_main_branch()?;
+
+    // Check for unpushed commits
+    let output = Command::new("git")
+        .args(["log", &format!("origin/{}..{}", main_branch, branch)])
+        .output();
+
+    match output {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.trim().is_empty() {
+                return Err("There are unpushed commits (run git push)".to_string());
+            }
+        }
+        Err(e) => {
+            // If we can't check, log a warning but don't fail
+            eprintln!("Warning: Could not check for unpushed commits: {}", e);
+        }
+    }
+
+    // Check 3: No stashes
+    let output = Command::new("git")
+        .args(["stash", "list"])
+        .output();
+    match output {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.trim().is_empty() {
+                return Err("You have git stashes (run git stash list)".to_string());
+            }
+        }
+        Err(_) => {
+            // Don't fail if we can't check stashes
+        }
+    }
+
+    Ok(())
+}
+
+/// Get the current git branch name.
+///
+/// # Returns
+/// - `Ok(branch_name)` - The current branch name
+/// - `Err(String)` if there was an error
+fn get_current_branch() -> Result<String, String> {
+    use std::process::Command;
+
+    let output = Command::new("git")
+        .args(["rev-parse", "--abbrev-ref", "HEAD"])
+        .output()
+        .map_err(|e| format!("Failed to get current branch: {}", e))?;
+
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() || branch == "HEAD" {
+        return Err("Could not determine current branch".to_string());
+    }
+
+    Ok(branch)
+}
+
+/// Get the main branch name (main or master).
+///
+/// # Returns
+/// - `Ok(branch_name)` - The main branch name ("main" or "master")
+fn get_main_branch() -> Result<String, String> {
+    use std::process::Command;
+
+    // First check if there's a remote origin with a refs/remotes/origin/HEAD
+    let output = Command::new("git")
+        .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
+        .output();
+
+    if let Ok(output) = output {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(branch) = stdout.strip_prefix("refs/remotes/origin/") {
+                return Ok(branch.trim().to_string());
+            }
+        }
+    }
+
+    // Check if main branch exists
+    let output = Command::new("git")
+        .args(["rev-parse", "--verify", "main"])
+        .output();
+
+    if let Ok(output) = output {
+        if output.status.success() {
+            return Ok("main".to_string());
+        }
+    }
+
+    // Check if master branch exists
+    let output = Command::new("git")
+        .args(["rev-parse", "--verify", "master"])
+        .output();
+
+    if let Ok(output) = output {
+        if output.status.success() {
+            return Ok("master".to_string());
+        }
+    }
+
+    // Fallback to "main" as default
+    Ok("main".to_string())
+}
+
+/// Remove workspace after completion.
+///
+/// # Arguments
+/// * `project_root` - Path to the project root
+/// * `yes_flag` - Skip confirmation prompts
+/// * `dry_run` - Show what would happen without executing
+///
+/// # Returns
+/// - `Ok(())` if workspace nuke succeeds
+/// - `Err(String)` if there was an error
+fn nuke_workspace_helper(
+    project_root: &Path,
+    yes_flag: bool,
+    dry_run: bool,
+) -> Result<(), String> {
+    use std::fs;
+    use std::process::Command;
+
+    // Get workspace path from OTTO_WORKSPACE environment variable
+    let workspace_path = std::env::var("OTTO_WORKSPACE")
+        .map_err(|_| "No workspace to clean up (OTTO_WORKSPACE not set)".to_string())?;
+
+    let workspace_path = Path::new(&workspace_path);
+
+    // Verify workspace exists
+    if !workspace_path.exists() {
+        return Err(format!("Workspace path does not exist: {:?}", workspace_path));
+    }
+
+    // Get relative path for display
+    let rel_path = workspace_path
+        .strip_prefix(project_root)
+        .unwrap_or(workspace_path);
+    println!("Workspace: {}", rel_path.display());
+
+    // Get branch name
+    let output = Command::new("git")
+        .args(["-C", workspace_path.to_str().unwrap(), "rev-parse", "--abbrev-ref", "HEAD"])
+        .output();
+    if let Ok(output) = output {
+        if output.status.success() {
+            let branch = String::from_utf8_lossy(&output.stdout);
+            println!("Branch: {}", branch.trim());
+        }
+    }
+
+    // Get bead ID from .workspace-info
+    let workspace_info = workspace_path.join(".workspace-info");
+    if workspace_info.exists() {
+        if let Ok(content) = fs::read_to_string(&workspace_info) {
+            for line in content.lines() {
+                if line.starts_with("issue_id=") {
+                    let bead_id = line.strip_prefix("issue_id=").unwrap_or("");
+                    if !bead_id.is_empty() {
+                        println!("Bead: {}", bead_id);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    println!();
+
+    // Safety check: verify workspace is clean
+    let output = Command::new("git")
+        .args(["-C", workspace_path.to_str().unwrap(), "status", "--porcelain"])
+        .output();
+
+    match output {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if !stdout.trim().is_empty() {
+                return Err("Workspace has uncommitted changes or untracked files".to_string());
+            }
+        }
+        Err(e) => {
+            return Err(format!("Failed to check workspace status: {}", e));
+        }
+    }
+
+    // Confirm removal (unless --yes flag)
+    if !yes_flag {
+        if dry_run {
+            println!("  [DRY RUN] Would prompt: Remove workspace '{}'? [y/N]", rel_path.display());
+        } else {
+            print!("Remove workspace '{}'? [y/N] ", rel_path.display());
+            use std::io::Write;
+            std::io::stdout().flush().unwrap();
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input).map_err(|e| format!("Failed to read input: {}", e))?;
+
+            if !input.trim().to_lowercase().starts_with('y') {
+                println!("Workspace cleanup cancelled");
+                return Ok(());
+            }
+        }
+    } else {
+        println!("Skipping confirmation (--yes flag set)");
+    }
+
+    // Remove workspace
+    if dry_run {
+        println!("  [DRY RUN] Would run: git worktree remove --force {}", workspace_path.display());
+        println!("  [DRY RUN] Would run: git worktree prune");
+    } else {
+        let output = Command::new("git")
+            .args(["worktree", "remove", "--force", workspace_path.to_str().unwrap()])
+            .output();
+
+        match output {
+            Ok(output) if output.status.success() => {
+                println!("✓ Removed workspace {}", rel_path.display());
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Failed to remove workspace: {}", stderr));
+            }
+            Err(e) => {
+                return Err(format!("Failed to run git worktree remove: {}", e));
+            }
+        }
+
+        // Prune orphaned worktrees metadata
+        let _ = Command::new("git")
+            .args(["worktree", "prune"])
+            .output();
+    }
+
+    println!("✓ Workspace cleanup complete");
+    Ok(())
+}
+
+/// Log termination events to .beads/terminations.log.
+///
+/// # Arguments
+/// * `log_file` - Path to the terminations.log file
+/// * `mode` - Exit mode ("completed" or "escalated")
+/// * `status` - Status ("success" or "failed")
+/// * `message` - Additional message to log
+fn log_termination_event(log_file: &Path, mode: &str, status: &str, message: &str) {
+    use std::fs;
+
+    // Create log directory if it doesn't exist
+    if let Some(parent) = log_file.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    // Get timestamp
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs().to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
+    // Get issue ID from environment or detect
+    let issue_id = std::env::var("BEAD_ID").unwrap_or_else(|_| String::from("none"));
+
+    // Log entry: timestamp | mode | status | issue_id | message
+    let log_entry = format!(
+        "[{}] mode={} status={} issue={} {}\n",
+        timestamp, mode, status, issue_id, message
+    );
+
+    // Append to log file
+    let _ = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+        .and_then(|mut file| {
+            use std::io::Write;
+            file.write_all(log_entry.as_bytes())
+        });
+}
+
+/// Exit Claude Code by sending SIGTERM to parent process.
+///
+/// # Arguments
+/// * `mode` - Exit mode (for logging purposes)
+/// * `timeout` - Timeout in seconds before force kill
+///
+/// # Returns
+/// - `Ok(())` if Claude exit was initiated successfully
+/// - `Err(String)` if there was an error
+fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
+
+    // Get the parent PID of this process
+    let current_pid = std::process::id();
+    let output = Command::new("ps")
+        .args(["-o", "ppid=", "-p", &current_pid.to_string()])
+        .output();
+
+    let parent_pid = match output {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout.trim().parse::<u32>().unwrap_or(0)
+        }
+        Err(_) => {
+            return Err("Could not determine parent PID".to_string());
+        }
+    };
+
+    if parent_pid == 0 {
+        return Err("Could not determine parent PID".to_string());
+    }
+
+    // Verify parent process exists
+    let output = Command::new("ps")
+        .args(["-p", &parent_pid.to_string()])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {}
+        _ => {
+            return Err("Parent process does not exist".to_string());
+        }
+    }
+
+    // Send SIGTERM for graceful shutdown
+    let _ = Command::new("kill")
+        .args(["-TERM", &parent_pid.to_string()])
+        .output();
+
+    // Wait for process to terminate with timeout
+    for _ in 0..timeout {
+        let output = Command::new("ps")
+            .args(["-p", &parent_pid.to_string()])
+            .output();
+
+        match output {
+            Ok(output) if !output.status.success() => {
+                // Process terminated
+                return Ok(());
+            }
+            _ => {
+                thread::sleep(Duration::from_secs(1));
+            }
+        }
+    }
+
+    // Timeout - force kill with SIGKILL
+    let _ = Command::new("kill")
+        .args(["-KILL", &parent_pid.to_string()])
+        .output();
+
+    thread::sleep(Duration::from_secs(1));
+
+    // Final check
+    let output = Command::new("ps")
+        .args(["-p", &parent_pid.to_string()])
+        .output();
+
+    match output {
+        Ok(output) if !output.status.success() => Ok(()),
+        Ok(_) => Err("Failed to terminate Claude process".to_string()),
+        Err(_) => Ok(()),
+    }
 }
 
 /// Sets up signal handlers for SIGINT (Ctrl+C) and SIGTERM.
@@ -897,6 +1782,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Commands::Done { mode, status, issue, nuke, yes, dry_run }) => {
+            if let Err(e) = run_done_command(mode, status, issue, nuke, yes, dry_run) {
+                print_error(&format!("otto done: {}", e));
+                std::process::exit(1);
+            }
+        }
         None => {
             // No subcommand provided, print help
             println!("Otto - Autonomous agent runner for beads tasks\n");
@@ -906,6 +1797,7 @@ fn main() {
             println!("  attach  Attach to a tmux window");
             println!("  ralph   Run the agent loop (default behavior)");
             println!("  spawn   Spawn a single agent for a specific issue");
+            println!("  done    Agent self-termination with cleanup");
             println!("\nFlags:");
             println!("  -h, --help     Print help");
             println!("  -V, --version  Print version");
@@ -920,6 +1812,8 @@ fn main() {
             println!("  otto spawn -i otto-123  Spawn agent for issue otto-123");
             println!("  otto spawn -i otto-123 --workspace ../agents/feature-x");
             println!("                         Spawn agent in isolated workspace");
+            println!("  otto done               Terminate with completed mode");
+            println!("  otto done --mode escalated  Escalate (skip validation)");
         }
     }
 }
