@@ -66,24 +66,6 @@ enum Commands {
         #[arg(long, short = 'p')]
         prompt_file: Option<String>,
     },
-
-    /// Manage Claude Code integration
-    ///
-    /// Install and configure hooks for Claude Code integration.
-    Claude {
-        #[command(subcommand)]
-        claude_command: ClaudeCommands,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum ClaudeCommands {
-    /// Install the otto stop hook for Claude Code
-    ///
-    /// This command installs the otto stop hook to ~/.claude/hooks/ and configures
-    /// Claude Code settings to use the hook. The hook ensures Claude only exits
-    /// after outputting the <PLANE-HAS-LANDED> marker.
-    Install,
 }
 
 /// Detects if PROMPT_RALPH.md exists in the repository root.
@@ -226,14 +208,6 @@ fn main() {
                 run_single_pass(prompt_file);
             }
         }
-        Some(Commands::Claude { claude_command }) => match claude_command {
-            ClaudeCommands::Install => {
-                if let Err(e) = install_claude_hook() {
-                    print_error(&format!("installing Claude hook: {}", e));
-                    std::process::exit(1);
-                }
-            }
-        },
         None => {
             // No subcommand provided, print help
             println!("Otto - Autonomous agent runner for beads tasks\n");
@@ -242,7 +216,6 @@ fn main() {
             println!("  start   Start otto in tmux (runs in background)");
             println!("  attach  Attach to a tmux window");
             println!("  ralph   Run the agent loop (default behavior)");
-            println!("  claude  Manage Claude Code integration");
             println!("\nFlags:");
             println!("  -h, --help     Print help");
             println!("  -V, --version  Print version");
@@ -254,7 +227,6 @@ fn main() {
             println!("  otto ralph --watch      Run in watch mode (infinite loop)");
             println!("  otto ralph -p FILE      Use custom prompt file");
             println!("                         (auto-detects PROMPT_RALPH.md if found)");
-            println!("  otto claude install     Install Claude Code stop hook");
         }
     }
 }
@@ -507,198 +479,4 @@ fn run_watch_loop(prompt_file: Option<&str>) {
             }
         }
     }
-}
-
-/// Install the otto stop hook for Claude Code
-///
-/// This function:
-/// 1. Creates ~/.claude/hooks/ directory if it doesn't exist
-/// 2. Writes the otto-stop-hook.sh script to the hooks directory
-/// 3. Makes the script executable
-/// 4. Creates or updates ~/.claude/settings.json with the hook configuration
-fn install_claude_hook() -> Result<(), Box<dyn std::error::Error>> {
-    use std::fs;
-    use std::io::Write;
-    use std::path::PathBuf;
-
-    // Get the Claude config directory
-    let mut claude_dir = PathBuf::from(
-        std::env::var("HOME")
-            .map_err(|_| "Could not determine HOME directory")?,
-    );
-    claude_dir.push(".claude");
-
-    // Create hooks directory
-    let hooks_dir = claude_dir.join("hooks");
-    fs::create_dir_all(&hooks_dir)?;
-
-    // Stop hook script content
-    let hook_script = r#"#!/usr/bin/env bash
-
-# Otto Stop Hook
-#
-# This hook is triggered when Claude attempts to exit. It checks if the
-# task completion marker <PLANE-HAS-LANDED> is present in the transcript.
-# If found, the hook allows the exit. Otherwise, it blocks exit and prompts
-# Claude to continue working.
-#
-# This ensures that Claude only exits after completing the assigned task.
-
-set -euo pipefail
-
-# Read hook input from stdin (advanced stop hook API)
-HOOK_INPUT=$(cat)
-
-# Get transcript path from hook input
-TRANSCRIPT_PATH=$(echo "$HOOK_INPUT" | jq -r '.transcript_path')
-
-if [[ ! -f "$TRANSCRIPT_PATH" ]]; then
-    # No transcript - allow exit (shouldn't happen normally)
-    exit 0
-fi
-
-# Read last assistant message from transcript (JSONL format)
-# Check if there are any assistant messages
-if ! grep -q '"role":"assistant"' "$TRANSCRIPT_PATH"; then
-    # No assistant messages - allow exit
-    exit 0
-fi
-
-# Extract last assistant message
-LAST_LINE=$(grep '"role":"assistant"' "$TRANSCRIPT_PATH" | tail -1)
-
-if [[ -z "$LAST_LINE" ]]; then
-    # No assistant message found - allow exit
-    exit 0
-fi
-
-# Parse JSON to extract text content
-LAST_OUTPUT=$(echo "$LAST_LINE" | jq -r '
-  .message.content |
-  map(select(.type == "text")) |
-  map(.text) |
-  join("\n")
-' 2>&1)
-
-# Check if jq succeeded
-if [[ $? -ne 0 ]]; then
-    # JSON parse failed - allow exit
-    exit 0
-fi
-
-# Check for task completion marker
-if echo "$LAST_OUTPUT" | grep -q "<PLANE-HAS-LANDED>"; then
-    # Task complete - find and kill parent Claude process
-    echo "✅ Plane has landed, terminating Claude..."
-
-    # Get the parent PID of this hook script
-    HOOK_PID=$$
-    PARENT_PID=$(ps -o ppid= -p $HOOK_PID | tr -d ' ')
-
-    # The parent should be Claude Code - kill it
-    if [[ -n "$PARENT_PID" ]]; then
-        # Double-check it's actually a Claude process before killing
-        if ps -p $PARENT_PID -o command= | grep -q "claude"; then
-            kill $PARENT_PID
-            echo "✅ Terminated Claude process (PID: $PARENT_PID)"
-        else
-            echo "⚠️  Parent process doesn't appear to be Claude, not killing"
-        fi
-    else
-        echo "⚠️  Could not determine parent PID"
-    fi
-
-    exit 0
-fi
-
-# Task not complete - block exit and prompt Claude to continue
-jq -n \
-  --arg msg "⚠️  Task not complete yet. Continue working on the assigned task and output <PLANE-HAS-LANDED> when done." \
-  '{
-    "decision": "block",
-    "reason": "Task completion marker <PLANE-HAS-LANDED> not found. Continue working.",
-    "systemMessage": $msg
-  }'
-
-exit 0
-"#;
-
-    // Write hook script
-    let hook_path = hooks_dir.join("otto-stop-hook.sh");
-    let mut file = fs::File::create(&hook_path)?;
-    file.write_all(hook_script.as_bytes())?;
-    file.sync_all()?;
-
-    // Make executable
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(&hook_path)?.permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(&hook_path, perms)?;
-    }
-
-    println!("✅ Created stop hook at: {}", hook_path.display());
-
-    // Create or update settings.json
-    let settings_path = claude_dir.join("settings.json");
-    let settings_content = if settings_path.exists() {
-        fs::read_to_string(&settings_path)?
-    } else {
-        // Start with empty JSON if settings file doesn't exist
-        "{}".to_string()
-    };
-
-    // Parse existing settings
-    let mut settings: serde_json::Value = serde_json::from_str(&settings_content)
-        .unwrap_or(serde_json::json!({}));
-
-    // Ensure hooks object exists
-    if settings.get("hooks").is_none() {
-        settings["hooks"] = serde_json::json!({});
-    }
-
-    // Define the otto stop hook
-    let otto_hook = serde_json::json!({
-        "hooks": [{
-            "type": "command",
-            "command": "~/.claude/hooks/otto-stop-hook.sh"
-        }]
-    });
-
-    // Get existing Stop hooks, or create empty array
-    let stop_hooks = settings["hooks"]["Stop"].as_array_mut();
-
-    if let Some(hooks_array) = stop_hooks {
-        // Check if otto hook already exists (by checking command path)
-        let otto_hook_exists = hooks_array.iter().any(|hook| {
-            hook.get("hooks")
-                .and_then(|h| h.as_array())
-                .and_then(|arr| arr.first())
-                .and_then(|first| first.get("command"))
-                .and_then(|cmd| cmd.as_str())
-                .map(|cmd| cmd.contains("otto-stop-hook.sh"))
-                .unwrap_or(false)
-        });
-
-        // Only add if not already present
-        if !otto_hook_exists {
-            hooks_array.push(otto_hook);
-        }
-    } else {
-        // No Stop hooks exist, create with otto hook
-        settings["hooks"]["Stop"] = serde_json::json!([otto_hook]);
-    }
-
-    // Write updated settings
-    let settings_json = serde_json::to_string_pretty(&settings)?;
-    let mut settings_file = fs::File::create(&settings_path)?;
-    settings_file.write_all(settings_json.as_bytes())?;
-    settings_file.sync_all()?;
-
-    println!("✅ Updated settings at: {}", settings_path.display());
-    println!("\n🎉 Otto stop hook installed successfully!");
-    println!("   Claude Code will now require the <PLANE-HAS-LANDED> marker to exit.");
-
-    Ok(())
 }

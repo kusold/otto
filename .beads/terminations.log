@@ -8,3 +8,6 @@
 [2026-01-25T23:55:07+00:00] mode=escalated status=success issue=otto-zam.3 escalated with state: unknown
 [2026-01-25T23:55:08+00:00] mode=escalated status=success issue=otto-zam.3 escalated with state: unknown, bead otto-test-closed left open
 [2026-01-25T23:55:09+00:00] mode=escalated status=success issue=otto-zam.3 escalated with state: unknown, bead otto-test-multi-1 left open
+[2026-01-25T23:58:16+00:00] mode=completed status=success issue=otto-zam.3 git validation passed, beads synced, bead closed, hook cleared
+[2026-01-26T00:09:15+00:00] mode=completed status=failed issue=otto-zam.3 bd sync failed
+[2026-01-26T00:09:26+00:00] mode=completed status=failed issue=otto-zam.3 validation failed

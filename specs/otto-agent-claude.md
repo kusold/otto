@@ -179,7 +179,7 @@ pub fn wait_for_claude_exit(timeout_secs: u64) -> ClaudeResult<()> {
 
 Build a Claude Code command with the given prompt.
 
-The agent runs in interactive mode and exits when the stop hook detects the `<PLANE-HAS-LANDED>` marker in the output. This provides full interactivity while ensuring clean exit after task completion.
+The agent runs in interactive mode and must proactively terminate with `otto done` when complete. The `<PLANE-HAS-LANDED>` marker is used to indicate task completion, but agents are responsible for running the termination command themselves.
 
 **Parameters:**
 - `prompt`: The prompt text to send to Claude
@@ -303,7 +303,7 @@ pub const OTTO_AGENT_PROMPT: &str =
     "Run bd ready, choose a bead, begin work on only that bead. When done, output <PLANE-HAS-LANDED> and then exit. Land the plane.";
 ```
 
-**Purpose:** This is the fixed prompt sent to all autonomous agents, ensuring consistent behavior across agent launches. The prompt instructs agents to output the `<PLANE-HAS-LANDED>` marker when complete, which is detected by the stop hook to allow clean exit.
+**Purpose:** This is the fixed prompt sent to all autonomous agents, ensuring consistent behavior across agent launches. The prompt instructs agents to output the `<PLANE-HAS-LANDED>` marker when complete, then proactively run `otto done` to terminate cleanly. Agents are responsible for their own termination - no blocking hooks are used.
 
 ## Technical Implementation Details
 

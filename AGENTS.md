@@ -14,6 +14,11 @@ bd sync               # Sync with git
 
 ## Landing the Plane (Session Completion)
 
+**🚨 CRITICAL: AGENTS MUST PROACTIVELY TERMINATE WITH `otto done` 🚨**
+
+**NEVER rely on external mechanisms to terminate your session.**
+**YOU MUST ALWAYS RUN `otto done` WHEN YOUR WORK IS COMPLETE.**
+
 **When ending a work session**, follow the workflow below. The final step MUST be `otto done`.
 
 **PRE-WORK (before running otto done):**
@@ -42,10 +47,37 @@ otto done --mode escalated
 - ✅ Exits Claude cleanly
 
 **CRITICAL RULES:**
-- Work is NOT complete until `otto done` succeeds
-- NEVER stop before running `otto done` - that leaves work stranded locally
-- If `otto done` fails, resolve the issue and retry
-- After `otto done` completes successfully, your session is complete
+- 🚨 Work is NOT complete until `otto done` succeeds
+- 🚨 NEVER stop before running `otto done` - that leaves work stranded locally
+- 🚨 NEVER wait for a hook or external mechanism to terminate you
+- 🚨 YOU are responsible for running `otto done` when your work is done
+- 🚨 If `otto done` fails, resolve the issue and retry
+- 🚨 After `otto done` completes successfully, your session is complete
+
+**THIS IS YOUR RESPONSIBILITY:**
+- ✅ DO: Run `otto done` when you complete your assigned work
+- ✅ DO: Run `otto done --mode escalated` if you're blocked or need help
+- ✅ DO: Run `otto pre-flight-check` before starting work to validate environment
+- ❌ DON'T: Wait for something else to terminate you
+- ❌ DON'T: Exit without running `otto done`
+- ❌ DON'T: Assume someone else will clean up
+
+## Pre-Flight Validation
+
+**Before starting work**, you can validate your environment with:
+
+```bash
+otto pre-flight-check
+```
+
+This checks:
+- ✅ Git repository status
+- ✅ Beads initialization
+- ✅ Beads sync status
+- ✅ No uncommitted changes
+- ✅ No unpushed commits
+
+If any check fails, fix the issues before proceeding with work.
 
 ## Session Termination: `otto done`
 
@@ -148,30 +180,19 @@ When you escalate, the bead stays open and hook state is preserved:
    otto done    # Normal completion when work is actually done
    ```
 
-## Debugging Hooks
+## Debugging
 
-### Otto Stop Hook Debug Mode
-
-The `otto-stop-hook.sh` hook can run in verbose/debug mode to help diagnose issues with the exit blocking behavior.
+The `otto done` command includes built-in debugging support.
 
 **Enable debug mode:**
 ```bash
-export OTTO_STOP_HOOK_DEBUG=1
-# or
-export OTTO_DEBUG=1
+OTTO_DEBUG=1 otto done
 ```
 
-**View debug logs:**
+**View termination history:**
 ```bash
-tail -f .beads/stop-hook.log
+cat .beads/terminations.log
 ```
 
-**What gets logged:**
-- Transcript path being checked
-- Last assistant message content (first 200 chars)
-- Whether `<PLANE-HAS-LANDED>` was found
-- Exit decision (allow or block)
-- Parent PID and Claude process detection
-
-This is useful when investigating why Claude is being blocked from exiting or when the hook is behaving unexpectedly.
+This shows all termination events with timestamps, modes, and outcomes.
 

@@ -12,7 +12,7 @@ Enable autonomous coding by running a simple loop where AI agents independently 
 
 ### 1. Subcommand-Based CLI
 - Uses subcommands for different operations (not simple flags)
-- Commands: `start`, `attach`, `ralph`, `claude`
+- Commands: `start`, `attach`, `ralph`
 - Each command serves a distinct purpose in the workflow
 
 ### 2. Tmux Session Integration
@@ -40,11 +40,12 @@ Enable autonomous coding by running a simple loop where AI agents independently 
 - Explicit `-p` flag always takes precedence over auto-detection
 - Reads prompt content from file and passes to Claude Code
 
-### 6. Claude Code Hook Installation
-- **`otto claude install`**: Installs the otto stop hook for Claude Code
-- Creates `~/.claude/hooks/otto-stop-hook.sh` script
-- Configures `~/.claude/settings.json` to use the hook
-- Hook ensures Claude only exits after outputting `<PLANE-HAS-LANDED>` marker
+### 6. Self-Termination Protocol
+- **Agents MUST proactively run `otto done`** when work is complete
+- **`otto done`**: Orchestrates clean agent exit with validation
+- **`otto done --mode escalated`**: Exit when blocked or needing intervention
+- **`otto pre-flight-check`**: Validate environment before starting work
+- Agents are responsible for their own termination - no blocking hooks
 
 ### 7. Graceful Shutdown
 - Handles SIGINT (Ctrl+C) and SIGTERM signals
@@ -133,25 +134,29 @@ When disabled (default):
 - Explicit `-p` flag always takes precedence over auto-detection
 - Useful for testing different prompts or specialized workflows
 
-#### `claude install`
-**Purpose**: Install the otto stop hook for Claude Code
+#### `done` (via shell wrapper)
+**Purpose**: Agent self-termination command
 
 **Behavior**:
-1. Creates `~/.claude/hooks/` directory if needed
-2. Writes `otto-stop-hook.sh` script to hooks directory
-3. Makes script executable (chmod 755)
-4. Creates or updates `~/.claude/settings.json`
-5. Adds stop hook configuration if not already present
-6. Hook checks for `<PLANE-HAS-LANDED>` marker before allowing Claude to exit
+- Validates git state (clean working tree, everything pushed)
+- Syncs beads to remote
+- Closes the hooked bead
+- Clears hook state
+- Exits Claude cleanly
 
-**Output**:
-```
- Created stop hook at: /home/user/.claude/hooks/otto-stop-hook.sh
- Created settings at: /home/user/.claude/settings.json
+See `bin/otto-done.sh` for full implementation.
 
- Otto stop hook installed successfully!
-   Claude Code will now require the <PLANE-HAS-LANDED> marker to exit.
-```
+#### `pre-flight-check` (via shell wrapper)
+**Purpose**: Validate environment before starting work
+
+**Behavior**:
+- Checks git repository status
+- Validates beads initialization
+- Checks beads sync status
+- Validates no uncommitted changes
+- Validates no unpushed commits
+
+See `bin/otto-pre-flight-check.sh` for full implementation.
 
 ### Usage Examples
 
@@ -183,9 +188,6 @@ otto ralph
 # Watch mode with custom prompt
 otto ralph --watch --prompt-file special-prompt.txt
 
-# Install Claude Code integration
-otto claude install
-
 # Run with no subcommand (shows help)
 otto
 ```
@@ -202,7 +204,6 @@ Commands:
   start   Start otto in tmux (runs in background)
   attach  Attach to a tmux window
   ralph   Run the agent loop (default behavior)
-  claude  Manage Claude Code integration
 
 Flags:
   -h, --help     Print help
@@ -216,7 +217,6 @@ Examples:
   otto ralph --watch      Run in watch mode (infinite loop)
   otto ralph -p FILE      Use custom prompt file
                          (auto-detects PROMPT_RALPH.md if found)
-  otto claude install     Install Claude Code stop hook
 ```
 
 **Watch mode startup:**
@@ -263,6 +263,18 @@ Warning: Agent timed out
 Error: Session 'otto' does not exist. Start otto with 'otto start'
 Error: Window 'ralph-xyz' does not exist in session 'otto'
 ```
+
+**Shell Wrapper Commands**:
+The `otto` binary includes shell wrapper scripts for additional functionality:
+
+**`otto done`** (implemented in `bin/otto-done.sh`):
+- Normal completion: `otto done`
+- Escalation mode: `otto done --mode escalated`
+- With explicit issue: `otto done --issue otto-123`
+
+**`otto pre-flight-check`** (implemented in `bin/otto-pre-flight-check.sh`):
+- Validate environment: `otto pre-flight-check`
+- With debug output: `OTTO_DEBUG=1 otto pre-flight-check`
 
 ## Dependencies
 
@@ -361,7 +373,7 @@ struct Args {
 ```
 **Purpose**: Holds top-level command-line arguments
 **Fields**:
-- `command`: Optional subcommand (start, attach, ralph, claude)
+- `command`: Optional subcommand (start, attach, ralph)
 
 ### `Commands` Enum
 ```rust
@@ -370,7 +382,6 @@ enum Commands {
     Start,
     Attach { window: Option<String> },
     Ralph { watch: bool, prompt_file: Option<String> },
-    Claude { claude_command: ClaudeCommands },
 }
 ```
 
@@ -417,7 +428,6 @@ The main crate uses error types from dependencies:
    - `start`: Execute `start_otto()`
    - `attach`: Execute `attach_to_window(window)`
    - `ralph`: Execute `run_single_pass()` or `run_watch_loop()`
-   - `claude install`: Execute `install_claude_hook()`
    - None: Print help text
 
 #### Execution Phase
@@ -521,32 +531,6 @@ loop:
 - Window doesn't exist: List available windows, show usage
 - Both are fatal errors (return Result::Err)
 
-### Claude Hook Installation
-
-#### `install_claude_hook()` Function
-
-**Steps**:
-1. Get Claude config directory (`~/.claude`)
-2. Create hooks directory (`~/.claude/hooks/`)
-3. Write otto-stop-hook.sh script
-4. Make script executable (chmod 755 on Unix)
-5. Read existing `~/.claude/settings.json` (or create empty object)
-6. Parse settings JSON
-7. Ensure "hooks" object exists
-8. Check if otto stop hook already exists
-9. Add otto stop hook if not present
-10. Write updated settings back to file
-11. Print success messages
-
-**Hook Script Behavior**:
-1. Read hook input from stdin (advanced stop hook API)
-2. Extract transcript path from JSON input
-3. Read last assistant message from transcript (JSONL format)
-4. Parse JSON to extract text content
-5. Check if `<PLANE-HAS-LANDED>` marker is present
-6. If found: Kill Claude Code parent process, allow exit
-7. If not found: Block exit with system message prompting continuation
-
 ### Agent Lifecycle
 
 **Launch Process** (delegated to `otto-core`):
@@ -636,13 +620,13 @@ No runtime configuration files. Behavior is fixed at compile time:
 - Fallback: `OTTO_AGENT_PROMPT` from otto-core if no custom prompt found
 - File content read and passed directly to Claude Code
 
-### Claude Code Configuration
+### Agent Self-Termination
 
-**Hook Installation**:
-- Run `otto claude install` to set up stop hook
-- Creates `~/.claude/hooks/otto-stop-hook.sh`
-- Modifies `~/.claude/settings.json` to register hook
-- Hook requires `<PLANE-HAS-LANDED>` marker for exit
+**Agents MUST proactively terminate**:
+- Run `otto done` when work is complete
+- Run `otto done --mode escalated` if blocked
+- No blocking hooks - agents are responsible for their own termination
+- See AGENTS.md for full protocol
 
 **No Configuration Files**:
 Otto itself has no configuration file support. All behavior is determined by:
@@ -674,16 +658,12 @@ Otto itself has no configuration file support. All behavior is determined by:
    - Used for agent monitoring
    - Standard Unix utility (usually installed by default)
 
-5. **jq** (JSON processor)
-   - Used by Claude Code stop hook
-   - Required for hook installation
-
 ### Platform Support
 
 **Supported**:
 - Linux (primary target)
 - macOS (with Brew-installed dependencies)
-- Unix-like systems with tmux, pgrep, jq
+- Unix-like systems with tmux, pgrep
 
 **Not Supported**:
 - Windows (no native tmux/pgrep support)
