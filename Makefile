@@ -1,4 +1,4 @@
-.PHONY: test test-integration test-cov test-cov-html test-cov-open help
+.PHONY: test test-integration test-cov test-cov-html test-cov-open install help
 
 help:
 	@echo "Available targets:"
@@ -7,6 +7,7 @@ help:
 	@echo "  make test-cov       - Run tests with coverage (terminal output)"
 	@echo "  make test-cov-html  - Run tests with coverage (HTML report)"
 	@echo "  make test-cov-open  - Run tests with coverage and open HTML report"
+	@echo "  make install        - Build and install binary to /home/mike/bin"
 	@echo "  make help           - Show this help message"
 
 test: test-integration
@@ -38,3 +39,13 @@ test-cov-html:
 test-cov-open: test-cov-html
 	@echo "Opening coverage report..."
 	@cargo llvm-cov --workspace --html --output-dir coverage --open
+
+install:
+	@echo "Building otto..."
+	@cargo build --release
+	@echo ""
+	@echo "Installing otto to /home/mike/bin..."
+	@mkdir -p /home/mike/bin
+	@cp target/release/otto /home/mike/bin
+	@echo ""
+	@echo "✓ otto installed successfully to /home/mike/bin/otto"
