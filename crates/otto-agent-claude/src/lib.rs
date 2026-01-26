@@ -321,4 +321,167 @@ mod tests {
         let result = get_prompt(Some("/nonexistent/file.txt"));
         assert!(result.is_err());
     }
+
+    // Tests for escape_shell_arg
+    #[test]
+    fn test_escape_shell_arg_simple() {
+        assert_eq!(escape_shell_arg("hello"), "'hello'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_spaces() {
+        assert_eq!(escape_shell_arg("hello world"), "'hello world'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_single_quote() {
+        assert_eq!(escape_shell_arg("it's"), "'it'\\''s'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_multiple_quotes() {
+        assert_eq!(escape_shell_arg("it's a test"), "'it'\\''s a test'");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_empty() {
+        assert_eq!(escape_shell_arg(""), "''");
+    }
+
+    #[test]
+    fn test_escape_shell_arg_with_special_chars() {
+        assert_eq!(escape_shell_arg("hello$world"), "'hello$world'");
+        assert_eq!(escape_shell_arg("hello;world"), "'hello;world'");
+    }
+
+    // Tests for ClaudeError Display
+    #[test]
+    fn test_claude_error_display_not_available() {
+        let err = ClaudeError::ClaudeNotAvailable;
+        let msg = format!("{}", err);
+        assert!(msg.contains("claude command not found"));
+        assert!(msg.contains("install Claude Code CLI"));
+    }
+
+    #[test]
+    fn test_claude_error_display_version_error() {
+        let err = ClaudeError::VersionError("test error".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("failed to get claude version"));
+        assert!(msg.contains("test error"));
+    }
+
+    #[test]
+    fn test_claude_error_display_start_failed() {
+        let err = ClaudeError::ClaudeStartFailed("start error".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("failed to start claude"));
+        assert!(msg.contains("start error"));
+    }
+
+    #[test]
+    fn test_claude_error_display_timeout() {
+        let err = ClaudeError::ClaudeTimeout;
+        let msg = format!("{}", err);
+        assert!(msg.contains("did not exit in expected time"));
+    }
+
+    #[test]
+    fn test_claude_error_display_execution_failed() {
+        let err = ClaudeError::ClaudeExecutionFailed("exec error".to_string());
+        let msg = format!("{}", err);
+        assert!(msg.contains("claude execution failed"));
+        assert!(msg.contains("exec error"));
+    }
+
+    // Tests for is_claude_process
+    #[test]
+    fn test_is_claude_process_nonexistent() {
+        // Use a very high PID that likely doesn't exist
+        assert!(!is_claude_process(999999999));
+    }
+
+    #[test]
+    fn test_is_claude_process_zero() {
+        // PID 0 doesn't exist
+        assert!(!is_claude_process(0));
+    }
+
+    #[test]
+    fn test_is_claude_process_one() {
+        // PID 1 is typically init/systemd, not claude
+        // The function should handle this gracefully
+        let result = is_claude_process(1);
+        // Just ensure it doesn't panic and returns a boolean
+        let _ = result;
+    }
+
+    // Tests for build_agent_prompt edge cases
+    #[test]
+    fn test_build_agent_prompt_with_quotes() {
+        let cmd = build_agent_prompt("test's prompt");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("test"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_empty() {
+        let cmd = build_agent_prompt("");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_newlines() {
+        let cmd = build_agent_prompt("line1\nline2");
+        assert!(cmd.contains("claude --dangerously-skip-permissions"));
+        assert!(cmd.contains("line1"));
+    }
+
+    // Tests for get_prompt with temp file
+    #[test]
+    fn test_get_prompt_from_file() {
+        // Create a temporary file
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt.txt");
+        let prompt_content = "custom prompt from file\n";
+
+        std::fs::write(&file_path, prompt_content).unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        // Should trim whitespace
+        assert_eq!(result.unwrap(), "custom prompt from file");
+
+        // Cleanup
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn test_get_prompt_from_file_with_whitespace() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt-ws.txt");
+        let prompt_content = "  prompt with spaces  \n  ";
+
+        std::fs::write(&file_path, prompt_content).unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "prompt with spaces");
+
+        std::fs::remove_file(&file_path).ok();
+    }
+
+    #[test]
+    fn test_get_prompt_empty_file() {
+        let temp_dir = std::env::temp_dir();
+        let file_path = temp_dir.join("test-prompt-empty.txt");
+
+        std::fs::write(&file_path, "").unwrap();
+
+        let result = get_prompt(Some(file_path.to_str().unwrap()));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+
+        std::fs::remove_file(&file_path).ok();
+    }
 }
