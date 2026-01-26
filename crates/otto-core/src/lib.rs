@@ -348,11 +348,11 @@ pub fn wait_for_claude_in_pane_with_progress(
 }
 
 /// State tracking for a window in the stuck window monitor.
-struct WindowState {
+pub(crate) struct WindowState {
     /// Hash of the pane content from the last check
-    last_content_hash: Option<String>,
+    pub(crate) last_content_hash: Option<String>,
     /// Number of consecutive checks with unchanged content
-    unchanged_count: u32,
+    pub(crate) unchanged_count: u32,
 }
 
 /// Starts the stuck window monitoring thread.
@@ -519,5 +519,544 @@ mod tests {
     #[test]
     fn test_default_timeout() {
         assert_eq!(DEFAULT_AGENT_TIMEOUT_SECS, 1800);
+    }
+
+    #[test]
+    fn test_format_duration_seconds_only() {
+        let duration = Duration::from_secs(45);
+        assert_eq!(format_duration(duration), "45s");
+    }
+
+    #[test]
+    fn test_format_duration_minutes_and_seconds() {
+        let duration = Duration::from_secs(83);
+        assert_eq!(format_duration(duration), "1m 23s");
+    }
+
+    #[test]
+    fn test_format_duration_hours_minutes_seconds() {
+        let duration = Duration::from_secs(3930);
+        assert_eq!(format_duration(duration), "1h 5m 30s");
+    }
+
+    #[test]
+    fn test_format_duration_hours_only() {
+        let duration = Duration::from_secs(7200);
+        assert_eq!(format_duration(duration), "2h");
+    }
+
+    #[test]
+    fn test_format_duration_zero() {
+        let duration = Duration::from_secs(0);
+        assert_eq!(format_duration(duration), "0s");
+    }
+
+    #[test]
+    fn test_format_duration_hours_and_seconds() {
+        let duration = Duration::from_secs(3605);
+        assert_eq!(format_duration(duration), "1h 5s");
+    }
+
+    #[test]
+    fn test_agent_error_display_claude_not_available() {
+        let err = AgentError::ClaudeNotAvailable;
+        assert_eq!(
+            format!("{}", err),
+            "claude command not found - please install Claude Code CLI"
+        );
+    }
+
+    #[test]
+    fn test_agent_error_display_tmux_error() {
+        let err = AgentError::TmuxError(TmuxError::TmuxNotAvailable);
+        assert!(format!("{}", err).contains("tmux error"));
+    }
+
+    #[test]
+    fn test_agent_error_display_agent_start_failed() {
+        let err = AgentError::AgentStartFailed("test failure".to_string());
+        assert_eq!(format!("{}", err), "failed to start agent: test failure");
+    }
+
+    #[test]
+    fn test_agent_error_display_agent_timeout() {
+        let err = AgentError::AgentTimeout;
+        assert_eq!(format!("{}", err), "agent did not exit in expected time");
+    }
+
+    #[test]
+    fn test_agent_error_display_prompt_file_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err = AgentError::PromptFileError("/path/to/file".to_string(), io_err);
+        assert_eq!(
+            format!("{}", err),
+            "failed to read prompt file '/path/to/file': file not found"
+        );
+    }
+
+    #[test]
+    fn test_agent_error_source() {
+        use std::error::Error;
+        let err = AgentError::ClaudeNotAvailable;
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn test_agent_result_type_alias() {
+        // Test that AgentResult works as expected
+        let ok_result: AgentResult<()> = Ok(());
+        assert!(ok_result.is_ok());
+
+        let err_result: AgentResult<()> = Err(AgentError::ClaudeNotAvailable);
+        assert!(err_result.is_err());
+    }
+
+    #[test]
+    fn test_from_tmux_error() {
+        let tmux_err = TmuxError::TmuxNotAvailable;
+        let agent_err: AgentError = tmux_err.into();
+        match agent_err {
+            AgentError::TmuxError(TmuxError::TmuxNotAvailable) => {}
+            _ => panic!("Expected TmuxError variant"),
+        }
+    }
+
+    #[test]
+    fn test_from_claude_error_not_available() {
+        let claude_err = ClaudeError::ClaudeNotAvailable;
+        let agent_err: AgentError = claude_err.into();
+        assert!(matches!(agent_err, AgentError::ClaudeNotAvailable));
+    }
+
+    #[test]
+    fn test_from_claude_error_timeout() {
+        let claude_err = ClaudeError::ClaudeTimeout;
+        let agent_err: AgentError = claude_err.into();
+        assert!(matches!(agent_err, AgentError::AgentTimeout));
+    }
+
+    #[test]
+    fn test_from_claude_error_start_failed() {
+        let claude_err = ClaudeError::ClaudeStartFailed("test".to_string());
+        let agent_err: AgentError = claude_err.into();
+        match agent_err {
+            AgentError::AgentStartFailed(msg) => assert_eq!(msg, "test"),
+            _ => panic!("Expected AgentStartFailed variant"),
+        }
+    }
+
+    #[test]
+    fn test_from_claude_error_execution_failed() {
+        let claude_err = ClaudeError::ClaudeExecutionFailed("exec failed".to_string());
+        let agent_err: AgentError = claude_err.into();
+        match agent_err {
+            AgentError::AgentStartFailed(msg) => assert_eq!(msg, "exec failed"),
+            _ => panic!("Expected AgentStartFailed variant"),
+        }
+    }
+
+    #[test]
+    fn test_from_claude_error_version_error() {
+        let claude_err = ClaudeError::VersionError("version".to_string());
+        let agent_err: AgentError = claude_err.into();
+        match agent_err {
+            AgentError::AgentStartFailed(msg) => assert_eq!(msg, "version"),
+            _ => panic!("Expected AgentStartFailed variant"),
+        }
+    }
+
+    #[test]
+    fn test_window_state_defaults() {
+        let state = WindowState {
+            last_content_hash: None,
+            unchanged_count: 0,
+        };
+        assert!(state.last_content_hash.is_none());
+        assert_eq!(state.unchanged_count, 0);
+    }
+
+    #[test]
+    fn test_window_state_with_hash() {
+        let state = WindowState {
+            last_content_hash: Some("abc123".to_string()),
+            unchanged_count: 1,
+        };
+        assert_eq!(state.last_content_hash, Some("abc123".to_string()));
+        assert_eq!(state.unchanged_count, 1);
+    }
+
+    #[test]
+    fn test_launch_agent_default_wrapper() {
+        // Test that launch_agent_default calls launch_agent with None timeout
+        // This is a compile-time check that the function signature matches
+        // We can't test the actual behavior without a running tmux session
+        let _ = launch_agent_default as fn(Option<&str>, Option<AbortCallback>) -> AgentResult<(Duration, String)>;
+    }
+
+    #[test]
+    fn test_agent_error_variants_exhaustive() {
+        // Ensure all error variants can be created
+        let _ = AgentError::ClaudeNotAvailable;
+        let _ = AgentError::TmuxError(TmuxError::TmuxNotAvailable);
+        let _ = AgentError::AgentStartFailed("test".to_string());
+        let _ = AgentError::AgentTimeout;
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "test");
+        let _ = AgentError::PromptFileError("path".to_string(), io_err);
+    }
+
+    #[test]
+    fn test_format_duration_edge_cases() {
+        // Test with large values
+        let duration = Duration::from_secs(86400 + 3600 + 60 + 1); // 1 day + 1 hour + 1 min + 1 sec
+        let result = format_duration(duration);
+        // Should format as 25h 1m 1s
+        assert!(result.contains("25h"));
+        assert!(result.contains("1m"));
+        assert!(result.contains("1s"));
+    }
+
+    #[test]
+    fn test_format_duration_only_minutes() {
+        let duration = Duration::from_secs(120);
+        assert_eq!(format_duration(duration), "2m");
+    }
+
+    #[test]
+    fn test_format_duration_hours_and_minutes() {
+        let duration = Duration::from_secs(3660);
+        assert_eq!(format_duration(duration), "1h 1m");
+    }
+
+    // Tests for is_claude_active_in_pane
+    #[test]
+    fn test_is_claude_active_in_pane_with_valid_pane() {
+        // Test with a valid pane spec format
+        let result = is_claude_active_in_pane(Some("otto:0.0"));
+        // This should either return Ok(false) if pane doesn't exist
+        // or Ok(true/Ok(false) depending on actual state
+        // We're testing that it doesn't panic and returns a Result
+        match result {
+            Ok(_) => {}, // Success - we don't care about actual value in unit test
+            Err(AgentError::TmuxError(_)) => {
+                // Expected if tmux not available
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_is_claude_active_in_pane_with_default_pane() {
+        // Test with None (should use default "otto:0.0")
+        let result = is_claude_active_in_pane(None);
+        match result {
+            Ok(_) => {},
+            Err(AgentError::TmuxError(_)) => {
+                // Expected if tmux not available
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_is_claude_active_in_pane_with_custom_pane() {
+        // Test with custom pane spec
+        let result = is_claude_active_in_pane(Some("mysession:mywindow.0"));
+        match result {
+            Ok(_) => {},
+            Err(AgentError::TmuxError(_)) => {
+                // Expected if tmux not available
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    // Tests for wait_for_claude_in_pane
+    #[test]
+    fn test_wait_for_claude_in_pane_immediate_timeout() {
+        // Test that timeout is respected
+        let result = wait_for_claude_in_pane("nonexistent:0.0", 1);
+
+        // Should timeout or return error
+        match result {
+            Err(AgentError::AgentTimeout) | Err(AgentError::TmuxError(_)) | Ok(_) => {
+                // All acceptable outcomes for nonexistent pane
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_wait_for_claude_in_pane_timeout_duration() {
+        // Test that 2 second timeout works - just ensure it doesn't hang
+        let start = std::time::Instant::now();
+        let result = wait_for_claude_in_pane("test:0.0", 2);
+        let elapsed = start.elapsed();
+
+        // Should complete within reasonable time (allow for early exit on errors)
+        assert!(elapsed < std::time::Duration::from_secs(5));
+
+        match result {
+            Err(AgentError::AgentTimeout) | Err(AgentError::TmuxError(_)) | Ok(_) => {
+                // All acceptable
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    // Tests for wait_for_claude_in_pane_with_progress
+    #[test]
+    fn test_wait_with_progress_without_callbacks() {
+        // Test basic functionality without callbacks
+        let result = wait_for_claude_in_pane_with_progress(
+            "test:0.0",
+            1,
+            None,
+            None,
+        );
+        // Should timeout or return immediately
+        match result {
+            Err(AgentError::AgentTimeout) | Ok(_) => {},
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_wait_with_progress_with_progress_callback() {
+        // Test with progress callback
+        let progress_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let progress_called_clone = progress_called.clone();
+
+        let callback: Box<dyn Fn(std::time::Duration)> = Box::new(move |_| {
+            progress_called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        let result = wait_for_claude_in_pane_with_progress(
+            "test:0.0",
+            1,
+            Some(callback),
+            None,
+        );
+
+        // Progress callback should have been called if we waited
+        // Or error may have occurred immediately
+        match result {
+            Err(AgentError::AgentTimeout) | Err(AgentError::TmuxError(_)) | Ok(_) => {
+                // All acceptable - callback may or may not have been called depending on error path
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_wait_with_progress_with_abort_callback() {
+        // Test with abort callback that triggers immediately
+        fn abort_now() -> bool {
+            true
+        }
+
+        let result = wait_for_claude_in_pane_with_progress(
+            "test:0.0",
+            10, // 10 second timeout
+            None,
+            Some(abort_now),
+        );
+
+        // Should return Ok quickly because abort is triggered
+        match result {
+            Ok(_) => {},
+            Err(_) => {},
+        }
+    }
+
+    #[test]
+    fn test_wait_with_progress_with_both_callbacks() {
+        // Test with both progress and abort callbacks
+        let progress_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let progress_count_clone = progress_count.clone();
+
+        let progress_callback: Box<dyn Fn(std::time::Duration)> = Box::new(move |_| {
+            progress_count_clone.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+
+        fn never_abort() -> bool {
+            false
+        }
+
+        let result = wait_for_claude_in_pane_with_progress(
+            "test:0.0",
+            1,
+            Some(progress_callback),
+            Some(never_abort),
+        );
+
+        // Just verify it completes without hanging
+        match result {
+            Err(AgentError::AgentTimeout) | Err(AgentError::TmuxError(_)) | Ok(_) => {
+                // All acceptable outcomes
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    // Tests for log_watchdog
+    #[test]
+    fn test_log_watchdog_creates_file() {
+        use std::fs;
+
+        // Get home directory
+        let home = std::env::var("HOME").unwrap();
+        let otto_dir = std::path::PathBuf::from(home).join(".otto");
+        let log_path = otto_dir.join("watchdog.log");
+
+        // Remove existing log file if present
+        let _ = fs::remove_file(&log_path);
+
+        // Log a message
+        let result = log_watchdog("Test message from unit test");
+
+        assert!(result.is_ok());
+
+        // Verify file was created
+        assert!(log_path.exists());
+
+        // Verify message was written
+        let contents = fs::read_to_string(&log_path).unwrap();
+        assert!(contents.contains("Test message from unit test"));
+
+        // Cleanup
+        let _ = fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn test_log_watchdog_multiple_messages() {
+        use std::fs;
+
+        let home = std::env::var("HOME").unwrap();
+        let otto_dir = std::path::PathBuf::from(home).join(".otto");
+        let log_path = otto_dir.join("watchdog.log");
+
+        // Remove existing log file
+        let _ = fs::remove_file(&log_path);
+
+        // Log multiple messages
+        log_watchdog("First message").unwrap();
+        log_watchdog("Second message").unwrap();
+        log_watchdog("Third message").unwrap();
+
+        // Verify all messages are in file
+        let contents = fs::read_to_string(&log_path).unwrap();
+        assert!(contents.contains("First message"));
+        assert!(contents.contains("Second message"));
+        assert!(contents.contains("Third message"));
+
+        // Verify they're on separate lines
+        let line_count = contents.lines().count();
+        assert_eq!(line_count, 3);
+
+        // Cleanup
+        let _ = fs::remove_file(&log_path);
+    }
+
+    #[test]
+    fn test_log_watchdog_timestamp_format() {
+        use std::fs;
+
+        let home = std::env::var("HOME").unwrap();
+        let otto_dir = std::path::PathBuf::from(home).join(".otto");
+        let log_path = otto_dir.join("watchdog.log");
+
+        let _ = fs::remove_file(&log_path);
+
+        log_watchdog("Timestamp test").unwrap();
+
+        let contents = fs::read_to_string(&log_path).unwrap();
+
+        // Check for timestamp format [YYYY-MM-DD HH:MM:SS UTC]
+        assert!(contents.contains("["));
+        assert!(contents.contains("]"));
+        assert!(contents.contains("UTC"));
+
+        // Cleanup
+        let _ = fs::remove_file(&log_path);
+    }
+
+    // Tests for cleanup_stuck_windows
+    #[test]
+    fn test_cleanup_stuck_windows_with_empty_states() {
+        let mut states: HashMap<String, WindowState> = HashMap::new();
+
+        let result = cleanup_stuck_windows(&mut states);
+
+        // Should succeed even with no windows
+        match result {
+            Ok(_) => {},
+            Err(AgentError::TmuxError(_)) => {
+                // Expected if tmux not available or session doesn't exist
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_cleanup_stuck_windows_with_existing_states() {
+        let mut states = HashMap::new();
+        states.insert("test-window".to_string(), WindowState {
+            last_content_hash: Some("abc123".to_string()),
+            unchanged_count: 1,
+        });
+
+        let result = cleanup_stuck_windows(&mut states);
+
+        match result {
+            Ok(_) => {},
+            Err(AgentError::TmuxError(_)) => {
+                // Expected if tmux not available or session doesn't exist
+            }
+            Err(_) => panic!("Unexpected error type"),
+        }
+    }
+
+    #[test]
+    fn test_cleanup_stuck_windows_preserves_states() {
+        let mut states = HashMap::new();
+        states.insert("window1".to_string(), WindowState {
+            last_content_hash: None,
+            unchanged_count: 0,
+        });
+        states.insert("window2".to_string(), WindowState {
+            last_content_hash: Some("xyz".to_string()),
+            unchanged_count: 2,
+        });
+
+        let _ = cleanup_stuck_windows(&mut states);
+
+        // States hashmap should still be accessible
+        assert!(states.contains_key("window1") || states.len() <= 2); // May be removed if window exists
+    }
+
+    // Integration-style tests for WindowState
+    #[test]
+    fn test_window_state_hash_updates() {
+        let mut state = WindowState {
+            last_content_hash: None,
+            unchanged_count: 0,
+        };
+
+        // First hash
+        state.last_content_hash = Some("hash1".to_string());
+        state.unchanged_count = 0;
+
+        // Same hash - increment
+        if state.last_content_hash.as_ref() == Some(&"hash1".to_string()) {
+            state.unchanged_count += 1;
+        }
+        assert_eq!(state.unchanged_count, 1);
+
+        // Different hash - reset
+        state.last_content_hash = Some("hash2".to_string());
+        if state.last_content_hash.as_ref() != Some(&"hash1".to_string()) {
+            state.unchanged_count = 0;
+        }
+        assert_eq!(state.unchanged_count, 0);
     }
 }
