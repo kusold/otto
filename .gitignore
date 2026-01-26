@@ -1,5 +1,6 @@
 /target
 .direnv/
+result
 result-bin
 .beads/*.sock
 .beads/export-state/
