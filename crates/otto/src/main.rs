@@ -2647,6 +2647,8 @@ fn main() {
                 print_error(&format!("otto done: {}", e));
                 std::process::exit(1);
             }
+            // Exit with special code to signal Claude to terminate
+            std::process::exit(144);
         }
         Some(Commands::PreFlightCheck) => {
             if let Err(e) = run_pre_flight_check() {
