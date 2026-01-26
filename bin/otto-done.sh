@@ -9,6 +9,8 @@
 #   --issue <id>      Explicit issue ID (e.g., otto-123)
 #   --mode <type>     Exit mode: completed | escalated (default: completed)
 #   --status <type>   Git state observation: clean | uncommitted | unpushed (for escalated mode)
+#   --nuke            Delete workspace after completion (only in completed mode)
+#   --yes             Skip confirmation prompts (for --nuke)
 #   --dry-run         Show what would happen without executing
 #   --help, -h        Show this help message
 #
@@ -35,6 +37,8 @@ DRY_RUN=0
 MODE="completed"
 ISSUE_ID=""
 STATUS_OBSERVATION=""
+NUKE_WORKSPACE=0
+YES_FLAG=0
 
 # Logging functions
 log_debug() {
@@ -79,6 +83,9 @@ Options:
                     clean         - Working tree clean, all pushed
                     uncommitted   - Uncommitted changes present
                     unpushed      - Committed but not pushed
+  --nuke            Delete workspace after completion (only in completed mode)
+                    Requires clean git state and confirmation
+  --yes             Skip confirmation prompts (use with --nuke)
   --dry-run         Show what would happen without executing
   --help, -h        Show this help message
 
@@ -103,12 +110,26 @@ Exit Modes:
       3. Leave hook bead set (for recovery)
       4. Exit Claude cleanly
 
+Workspace Cleanup (--nuke flag):
+  Remove workspace directory after completion (completed mode only).
+  Requires clean git state and confirmation (unless --yes flag).
+  Uses OTTO_WORKSPACE environment variable to identify workspace.
+  Steps:
+    1. Run all validations and close hook
+    2. Check OTTO_WORKSPACE is set
+    3. Verify workspace is clean
+    4. Prompt for confirmation (unless --yes)
+    5. Run 'git worktree remove $OTTO_WORKSPACE'
+    6. Log nuke event
+
 Examples:
-  otto done                          # Completed mode with auto-detected issue
-  otto done --mode escalated         # Escalated mode (blocked, need human)
-  otto done --issue otto-123         # Explicit issue ID
+  otto done                                    # Completed mode with auto-detected issue
+  otto done --mode escalated                   # Escalated mode (blocked, need human)
+  otto done --issue otto-123                   # Explicit issue ID
   otto done --mode escalated --status uncommitted  # Escalated with observation
-  otto done --dry-run                # Preview what would happen
+  otto done --nuke                             # Completed mode + delete workspace
+  otto done --nuke --yes                       # Delete workspace without confirmation
+  otto done --dry-run                          # Preview what would happen
 
 Environment:
   OTTO_DEBUG=1    Enable verbose debug output
@@ -162,6 +183,14 @@ parse_args() {
                 DRY_RUN=1
                 shift
                 ;;
+            --nuke)
+                NUKE_WORKSPACE=1
+                shift
+                ;;
+            --yes)
+                YES_FLAG=1
+                shift
+                ;;
             --help|-h)
                 show_help
                 exit 0
@@ -180,11 +209,20 @@ parse_args() {
         exit 1
     fi
 
+    # Validate: --nuke only allowed with --mode completed
+    if [[ $NUKE_WORKSPACE -eq 1 ]] && [[ "$MODE" != "completed" ]]; then
+        log_error "--nuke option can only be used with --mode completed"
+        log_error "Workspace cleanup is not available in escalated mode (workspace preserved for recovery)"
+        exit 1
+    fi
+
     # Debug output
     log_debug "Configuration:"
     log_debug "  MODE=$MODE"
     log_debug "  ISSUE_ID=$ISSUE_ID"
     log_debug "  STATUS_OBSERVATION=$STATUS_OBSERVATION"
+    log_debug "  NUKE_WORKSPACE=$NUKE_WORKSPACE"
+    log_debug "  YES_FLAG=$YES_FLAG"
     log_debug "  DRY_RUN=$DRY_RUN"
 }
 
@@ -435,6 +473,177 @@ clear_hook_bead() {
     fi
 }
 
+# Workspace cleanup functions
+get_workspace_path() {
+    # Get workspace path from OTTO_WORKSPACE environment variable
+    # Returns 0 and sets WORKSPACE_PATH if found, returns 1 otherwise
+
+    if [[ -n "${OTTO_WORKSPACE:-}" ]]; then
+        WORKSPACE_PATH="$OTTO_WORKSPACE"
+        log_debug "Detected workspace from OTTO_WORKSPACE: $WORKSPACE_PATH"
+        return 0
+    fi
+
+    log_debug "No workspace detected (OTTO_WORKSPACE not set)"
+    WORKSPACE_PATH=""
+    return 1
+}
+
+is_workspace_clean() {
+    # Check if workspace is clean (no uncommitted changes)
+    # This is a safety check before nuking
+
+    local workspace_path="$1"
+
+    if [[ ! -d "$workspace_path" ]]; then
+        log_error "Workspace path does not exist: $workspace_path"
+        return 1
+    fi
+
+    # Change to workspace directory to check git state
+    pushd "$workspace_path" >/dev/null 2>&1 || return 1
+
+    # Check for unstaged and staged changes
+    if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+        popd >/dev/null 2>&1 || true
+        log_debug "Workspace has uncommitted changes"
+        return 1
+    fi
+
+    # Check for untracked files (excluding .workspace-info which is expected)
+    local untracked
+    untracked=$(git ls-files --others --exclude-standard 2>/dev/null | grep -v "^.workspace-info$" | grep -v "^.beads/" || echo "")
+
+    popd >/dev/null 2>&1 || true
+
+    if [[ -n "$untracked" ]]; then
+        log_debug "Workspace has untracked files"
+        return 1
+    fi
+
+    log_debug "Workspace is clean"
+    return 0
+}
+
+get_workspace_info() {
+    # Get workspace metadata for display
+    local workspace_path="$1"
+
+    # Get relative path
+    local rel_path
+    rel_path=$(realpath --relative-to="$PROJECT_ROOT" "$workspace_path" 2>/dev/null || echo "$workspace_path")
+
+    # Get branch name
+    local branch
+    branch=$(cd "$workspace_path" && git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
+
+    # Get bead ID from .workspace-info
+    local bead_id=""
+    if [[ -f "$workspace_path/.workspace-info" ]]; then
+        bead_id=$(grep "^issue_id=" "$workspace_path/.workspace-info" 2>/dev/null | cut -d'=' -f2 || echo "")
+    fi
+
+    echo "$rel_path|$branch|$bead_id"
+}
+
+nuke_workspace() {
+    # Remove workspace after completion
+    # Returns 0 if workspace nuke succeeds, non-zero otherwise
+
+    log_info "Step 5: Cleaning up workspace..."
+
+    # Get workspace path
+    if ! get_workspace_path; then
+        log_warning "No workspace to clean up (OTTO_WORKSPACE not set)"
+        return 0
+    fi
+
+    local workspace_path="$WORKSPACE_PATH"
+
+    # Verify workspace exists
+    if [[ ! -d "$workspace_path" ]]; then
+        log_warning "Workspace path does not exist: $workspace_path"
+        log_warning "Skipping workspace cleanup"
+        return 0
+    fi
+
+    # Get workspace info for display
+    local workspace_info
+    workspace_info=$(get_workspace_info "$workspace_path")
+    local rel_path="${workspace_info%%|*}"
+    local branch="${workspace_info#*|}"
+    local bead_id="${branch##*|}"
+    branch="${branch%|*}"
+
+    log_info "Workspace: $rel_path"
+    log_info "Branch: $branch"
+    if [[ -n "$bead_id" ]]; then
+        log_info "Bead: $bead_id"
+    fi
+    echo ""
+
+    # Safety check: verify workspace is clean
+    if ! is_workspace_clean "$workspace_path"; then
+        log_error "Workspace has uncommitted changes or untracked files"
+        log_error "Cannot nuke workspace in this state"
+        log_info "Run 'git status' in the workspace to see what needs to be committed"
+        return 1
+    fi
+
+    # Confirm removal (unless --yes flag)
+    if [[ $YES_FLAG -eq 0 ]]; then
+        if [[ "$DRY_RUN" == "1" ]]; then
+            log_info "  [DRY RUN] Would prompt: Remove workspace '$rel_path'? [y/N]"
+        else
+            read -p "Remove workspace '$rel_path'? [y/N] " -n 1 -r
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                log_warning "Workspace cleanup cancelled"
+                return 0
+            fi
+        fi
+    else
+        log_debug "Skipping confirmation (--yes flag set)"
+    fi
+
+    # Remove workspace
+    log_debug "Removing workspace: $workspace_path"
+
+    if [[ "$DRY_RUN" == "1" ]]; then
+        log_info "  [DRY RUN] Would run: git worktree remove --force $workspace_path"
+        log_info "  [DRY RUN] Would run: git worktree prune"
+        return 0
+    fi
+
+    # Remove the worktree
+    local output
+    if output=$(git worktree remove --force "$workspace_path" 2>&1); then
+        log_success "Removed workspace $rel_path"
+    else
+        log_error "Failed to remove workspace"
+        echo "$output"
+        return 1
+    fi
+
+    # Prune orphaned worktrees metadata
+    if git worktree prune 2>/dev/null; then
+        log_debug "Pruned orphaned worktree metadata"
+    else
+        log_warning "Failed to prune worktree metadata (non-critical)"
+    fi
+
+    # Log nuke event
+    local nuke_msg="workspace nuked: $rel_path (branch: $branch"
+    if [[ -n "$bead_id" ]]; then
+        nuke_msg="$nuke_msg, bead: $bead_id"
+    fi
+    nuke_msg="$nuke_msg)"
+    log_termination_event "completed" "success" "$nuke_msg"
+
+    log_success "Workspace cleanup complete"
+    return 0
+}
+
 # Auto-detect issue ID from environment or beads state
 detect_issue_id() {
     if [[ -n "$ISSUE_ID" ]]; then
@@ -678,14 +887,25 @@ main() {
             log_warning "Hook bead cleanup encountered issues (continuing)"
         fi
 
-        # Step 5: Log completion event
+        # Step 5: Nuke workspace (if --nuke flag)
+        if [[ $NUKE_WORKSPACE -eq 1 ]]; then
+            if ! nuke_workspace; then
+                echo ""
+                log_error "Workspace cleanup failed"
+                log_info "Workspace cleanup is optional, but termination will continue"
+                # Continue anyway - workspace cleanup is optional
+            fi
+            echo ""
+        fi
+
+        # Step 6: Log completion event
         log_termination_event "completed" "success" "$exit_message"
 
-        # Step 6: Exit Claude cleanly
+        # Step 7: Exit Claude cleanly
         if [[ "$DRY_RUN" == "1" ]]; then
-            log_info "Step 5: [DRY RUN] Would exit Claude cleanly"
+            log_info "Step 6: [DRY RUN] Would exit Claude cleanly"
         else
-            log_info "Step 5: Exiting Claude cleanly..."
+            log_info "Step 6: Exiting Claude cleanly..."
             if exit_claude "completed" 5; then
                 log_success "Claude exit initiated"
             else
