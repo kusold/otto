@@ -348,7 +348,53 @@ pub fn generate_agent_window_name() -> String {
     format!("{}{}", AGENT_WINDOW_PREFIX, petname)
 }
 
+/// Gets the next available window index in a tmux session.
+///
+/// This function lists all existing window indices in the session
+/// and returns the next available index (max_index + 1).
+///
+/// # Arguments
+/// * `session_name` - The name of the session
+///
+/// # Returns
+/// - `Ok(i32)` containing the next available window index
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+/// - `Err(TmuxError::SessionCheckFailed)` if listing fails
+fn get_next_window_index(session_name: &str) -> TmuxResult<i32> {
+    if !is_tmux_available() {
+        return Err(TmuxError::TmuxNotAvailable);
+    }
+
+    // List existing window indices
+    let output = Command::new("tmux")
+        .args(["list-windows", "-t", session_name, "-F", "#{window_index}"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            // Parse all window indices and find the maximum
+            let max_index = stdout
+                .lines()
+                .filter_map(|line| line.trim().parse::<i32>().ok())
+                .max()
+                .unwrap_or(-1); // If no windows exist, start from 0
+
+            Ok(max_index + 1)
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(TmuxError::SessionCheckFailed(stderr.to_string()))
+        }
+        Err(e) => Err(TmuxError::SessionCheckFailed(e.to_string())),
+    }
+}
+
 /// Creates a new tmux window with the given name in a session.
+///
+/// This function finds the next available window index and creates
+/// a new window at that explicit index to avoid tmux bugs with
+/// implicit index assignment when windows at indices 1 and 2 exist.
 ///
 /// # Arguments
 /// * `session_name` - The name of the session
@@ -363,8 +409,13 @@ pub fn create_named_window(session_name: &str, window_name: &str) -> TmuxResult<
         return Err(TmuxError::TmuxNotAvailable);
     }
 
+    // Get the next available window index
+    let next_index = get_next_window_index(session_name)?;
+
+    // Create window with explicit index to avoid tmux bug
+    let target = format!("{}:{}", session_name, next_index);
     let output = Command::new("tmux")
-        .args(["new-window", "-t", session_name, "-n", window_name])
+        .args(["new-window", "-t", &target, "-n", window_name])
         .output();
 
     match output {
