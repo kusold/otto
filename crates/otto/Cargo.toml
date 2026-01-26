@@ -2,6 +2,7 @@
 name = "otto"
 version.workspace = true
 edition.workspace = true
+repository = "https://github.com/kusold/otto"
 
 [dependencies]
 clap.workspace = true
