@@ -827,4 +827,304 @@ mod tests {
         // Just verify the function signature compiles
         let _ = window_exists as fn(&str, &str) -> TmuxResult<bool>;
     }
+
+    #[test]
+    fn test_tmux_error_display() {
+        let err = TmuxError::TmuxNotAvailable;
+        assert!(format!("{}", err).contains("not found"));
+
+        let err2 = TmuxError::SessionCreationFailed("test".to_string());
+        assert!(format!("{}", err2).contains("test"));
+
+        let err3 = TmuxError::WindowCreationFailed("test".to_string());
+        assert!(format!("{}", err3).contains("test"));
+
+        let err4 = TmuxError::CommandExecutionFailed("test".to_string());
+        assert!(format!("{}", err4).contains("test"));
+
+        let err5 = TmuxError::SessionCheckFailed("test".to_string());
+        assert!(format!("{}", err5).contains("test"));
+
+        let err6 = TmuxError::PaneProcessQueryFailed("test".to_string());
+        assert!(format!("{}", err6).contains("test"));
+
+        let err7 = TmuxError::InvalidPaneSpec("test".to_string());
+        assert!(format!("{}", err7).contains("test"));
+    }
+
+    #[test]
+    fn test_tmux_error_impls() {
+        // Verify that TmuxError implements the required traits
+        let err = TmuxError::TmuxNotAvailable;
+        let _display: &dyn std::fmt::Display = &err;
+        let _debug: &dyn std::fmt::Debug = &err;
+        let _error: &dyn std::error::Error = &err;
+    }
+
+    #[test]
+    fn test_tmux_result_type_exists() {
+        // Verify that TmuxResult is a Result type
+        let ok_result: TmuxResult<()> = Ok(());
+        let err_result: TmuxResult<()> = Err(TmuxError::TmuxNotAvailable);
+
+        assert!(ok_result.is_ok());
+        assert!(err_result.is_err());
+    }
+
+    #[test]
+    fn test_all_error_variants_exist() {
+        // Verify all error variants can be created
+        let _ = TmuxError::TmuxNotAvailable;
+        let _ = TmuxError::SessionCreationFailed("test".to_string());
+        let _ = TmuxError::WindowCreationFailed("test".to_string());
+        let _ = TmuxError::CommandExecutionFailed("test".to_string());
+        let _ = TmuxError::SessionCheckFailed("test".to_string());
+        let _ = TmuxError::PaneProcessQueryFailed("test".to_string());
+        let _ = TmuxError::InvalidPaneSpec("test".to_string());
+    }
+
+    #[test]
+    fn test_error_matching() {
+        // Test pattern matching on error types
+        match TmuxError::TmuxNotAvailable {
+            TmuxError::TmuxNotAvailable => assert!(true),
+            _ => assert!(false),
+        }
+
+        match TmuxError::SessionCreationFailed("test".to_string()) {
+            TmuxError::SessionCreationFailed(_) => assert!(true),
+            _ => assert!(false),
+        }
+
+        match TmuxError::WindowCreationFailed("test".to_string()) {
+            TmuxError::WindowCreationFailed(_) => assert!(true),
+            _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn test_tmux_result_with_ok() {
+        // Test TmuxResult with Ok values
+        let result: TmuxResult<bool> = Ok(true);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), true);
+
+        let result2: TmuxResult<()> = Ok(());
+        assert!(result2.is_ok());
+    }
+
+    #[test]
+    fn test_tmux_result_with_err() {
+        // Test TmuxResult with Err values
+        let result: TmuxResult<()> = Err(TmuxError::TmuxNotAvailable);
+        assert!(result.is_err());
+
+        let result2: TmuxResult<()> = Err(TmuxError::SessionCreationFailed("test".to_string()));
+        assert!(result2.is_err());
+
+        let result3: TmuxResult<()> = Err(TmuxError::InvalidPaneSpec("test".to_string()));
+        assert!(result3.is_err());
+    }
+
+    #[test]
+    fn test_tmux_result_map_and_or_else() {
+        // Test that TmuxResult works with standard Result methods
+        let result: TmuxResult<bool> = Ok(true);
+        let mapped = result.map(|v| !v);
+        assert_eq!(mapped.unwrap(), false);
+
+        let result2: TmuxResult<bool> = Err(TmuxError::TmuxNotAvailable);
+        let recovered = result2.or_else(|e| match e {
+            TmuxError::TmuxNotAvailable => Ok(false),
+            _ => Err(e),
+        });
+        assert_eq!(recovered.unwrap(), false);
+    }
+
+    #[test]
+    fn test_get_pane_spec_format() {
+        // Test the pane spec format generation
+        let spec = get_pane_spec("mysession", "mywindow");
+        assert_eq!(spec, "mysession:mywindow.0");
+
+        let spec2 = get_pane_spec("otto", "ralph-test");
+        assert_eq!(spec2, "otto:ralph-test.0");
+    }
+
+    #[test]
+    fn test_session_exists_function_exists() {
+        // Verify function signature
+        let _ = session_exists as fn(&str) -> TmuxResult<bool>;
+    }
+
+    #[test]
+    fn test_create_session_function_exists() {
+        // Verify function signature
+        let _ = create_session as fn(&str) -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_ensure_session_function_exists() {
+        // Verify function signature
+        let _ = ensure_session as fn(&str) -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_send_command_function_exists() {
+        // Verify function signature
+        let _ = send_command as fn(&str, &str) -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_ensure_otto_session_function_exists() {
+        // Verify function signature
+        let _ = ensure_otto_session as fn() -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_send_otto_command_function_exists() {
+        // Verify function signature
+        let _ = send_otto_command as fn(&str) -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_get_pane_pid_function_exists() {
+        // Verify function signature
+        let _ = get_pane_pid as fn(&str) -> TmuxResult<Option<u32>>;
+    }
+
+    #[test]
+    fn test_get_pane_command_function_exists() {
+        // Verify function signature
+        let _ = get_pane_command as fn(&str) -> TmuxResult<Option<String>>;
+    }
+
+    #[test]
+    fn test_create_named_window_function_exists() {
+        // Verify function signature
+        let _ = create_named_window as fn(&str, &str) -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_find_idle_agent_window_function_exists() {
+        // Verify function signature
+        let _ = find_idle_agent_window as fn(&str) -> TmuxResult<Option<String>>;
+    }
+
+    #[test]
+    fn test_get_or_create_agent_window_function_exists() {
+        // Verify function signature
+        let _ = get_or_create_agent_window as fn(&str) -> TmuxResult<String>;
+    }
+
+    #[test]
+    fn test_list_windows_by_pattern_function_exists() {
+        // Verify function signature
+        let _ = list_windows_by_pattern as fn(&str, &str) -> TmuxResult<Vec<String>>;
+    }
+
+    #[test]
+    fn test_kill_window_function_exists() {
+        // Verify function signature
+        let _ = kill_window as fn(&str, &str) -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_capture_pane_function_exists() {
+        // Verify function signature
+        let _ = capture_pane as fn(&str) -> TmuxResult<String>;
+    }
+
+    #[test]
+    fn test_attach_to_window_function_exists() {
+        // Verify function signature
+        let _ = attach_to_window as fn(&str, &str) -> TmuxResult<()>;
+    }
+
+    #[test]
+    fn test_error_messages_are_descriptive() {
+        // Verify error messages provide useful information
+        let err = TmuxError::TmuxNotAvailable;
+        let msg = format!("{}", err);
+        assert!(msg.contains("tmux"));
+        assert!(msg.contains("install"));
+
+        let err2 = TmuxError::InvalidPaneSpec("session:window.pane".to_string());
+        let msg2 = format!("{}", err2);
+        assert!(msg2.contains("invalid"));
+        assert!(msg2.contains("pane specification"));
+    }
+
+    #[test]
+    fn test_constants_are_correct() {
+        // Test that constants have expected values
+        assert_eq!(OTTO_SESSION_NAME, "otto");
+        assert_eq!(AGENT_WINDOW_PREFIX, "ralph-");
+    }
+
+    #[test]
+    fn test_multiple_error_variants_match() {
+        // Verify all error variants can be matched exhaustively
+        let errors = vec![
+            TmuxError::TmuxNotAvailable,
+            TmuxError::SessionCreationFailed("a".to_string()),
+            TmuxError::WindowCreationFailed("b".to_string()),
+            TmuxError::CommandExecutionFailed("c".to_string()),
+            TmuxError::SessionCheckFailed("d".to_string()),
+            TmuxError::PaneProcessQueryFailed("e".to_string()),
+            TmuxError::InvalidPaneSpec("f".to_string()),
+        ];
+
+        for err in errors {
+            match err {
+                TmuxError::TmuxNotAvailable => {}
+                TmuxError::SessionCreationFailed(_) => {}
+                TmuxError::WindowCreationFailed(_) => {}
+                TmuxError::CommandExecutionFailed(_) => {}
+                TmuxError::SessionCheckFailed(_) => {}
+                TmuxError::PaneProcessQueryFailed(_) => {}
+                TmuxError::InvalidPaneSpec(_) => {}
+            }
+        }
+    }
+
+    #[test]
+    fn test_tmux_result_operations() {
+        // Test various Result operations
+        let result: TmuxResult<i32> = Ok(42);
+        assert!(result.is_ok());
+        assert!(!result.is_err());
+        assert_eq!(result.unwrap(), 42);
+
+        let result2: TmuxResult<i32> = Err(TmuxError::TmuxNotAvailable);
+        assert!(result2.is_err());
+        assert!(!result2.is_ok());
+
+        let result3: TmuxResult<i32> = Ok(10);
+        assert_eq!(result3.unwrap_or(0), 10);
+
+        let result4: TmuxResult<i32> = Err(TmuxError::TmuxNotAvailable);
+        assert_eq!(result4.unwrap_or(0), 0);
+    }
+
+    #[test]
+    fn test_window_name_generation_consistency() {
+        // Test that window name generation follows expected pattern
+        for _ in 0..10 {
+            let name = generate_agent_window_name();
+            assert!(name.starts_with(AGENT_WINDOW_PREFIX));
+            assert!(name.len() > AGENT_WINDOW_PREFIX.len());
+            // Should only contain lowercase letters, numbers, and hyphens
+            assert!(name.chars().all(|c| c.is_lowercase() || c.is_numeric() || c == '-'));
+        }
+    }
+
+    #[test]
+    fn test_pane_spec_edge_cases() {
+        // Test pane spec generation with edge case names
+        assert_eq!(get_pane_spec("", ""), ":.0");
+        assert_eq!(get_pane_spec("s", "w"), "s:w.0");
+        assert_eq!(get_pane_spec("session-with-dashes", "window-with-dashes"), "session-with-dashes:window-with-dashes.0");
+        assert_eq!(get_pane_spec("session_with_underscores", "window_with_underscores"), "session_with_underscores:window_with_underscores.0");
+    }
 }

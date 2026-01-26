@@ -103,4 +103,138 @@ mod tests {
     fn test_print_progress_doesnt_crash() {
         print_progress("Test progress message");
     }
+
+    #[test]
+    fn test_print_error_with_empty_message() {
+        print_error("");
+    }
+
+    #[test]
+    fn test_print_error_with_unicode() {
+        print_error("Error with unicode: 🚨 💥 ⚠️");
+    }
+
+    #[test]
+    fn test_print_error_with_long_message() {
+        let long_msg = "This is a very long error message that spans multiple lines and contains lots of information about what went wrong. ".repeat(10);
+        print_error(&long_msg);
+    }
+
+    #[test]
+    fn test_print_warning_with_empty_message() {
+        print_warning("");
+    }
+
+    #[test]
+    fn test_print_warning_with_unicode() {
+        print_warning("Warning with unicode: ⚠️ 🚸 🔔");
+    }
+
+    #[test]
+    fn test_print_warning_with_long_message() {
+        let long_msg = "This is a very long warning message that spans multiple lines and contains lots of information about what might go wrong. ".repeat(10);
+        print_warning(&long_msg);
+    }
+
+    #[test]
+    fn test_print_info_with_empty_message() {
+        print_info("");
+    }
+
+    #[test]
+    fn test_print_info_with_unicode() {
+        print_info("Info with unicode: ℹ️ 💡 📝");
+    }
+
+    #[test]
+    fn test_print_info_with_long_message() {
+        let long_msg = "This is a very long info message that spans multiple lines and contains lots of information about what is happening. ".repeat(10);
+        print_info(&long_msg);
+    }
+
+    #[test]
+    fn test_print_progress_with_empty_message() {
+        print_progress("");
+    }
+
+    #[test]
+    fn test_print_progress_with_unicode() {
+        print_progress("Progress with unicode: ⏳ 🚀 📊");
+    }
+
+    #[test]
+    fn test_print_progress_with_long_message() {
+        let long_msg = "This is a very long progress message that shows the current status of the operation. ".repeat(10);
+        print_progress(&long_msg);
+    }
+
+    #[test]
+    fn test_print_error_with_special_chars() {
+        print_error("Error with special chars: \t\n\r\"'\\");
+    }
+
+    #[test]
+    fn test_print_warning_with_special_chars() {
+        print_warning("Warning with special chars: \t\n\r\"'\\");
+    }
+
+    #[test]
+    fn test_print_info_with_special_chars() {
+        print_info("Info with special chars: \t\n\r\"'\\");
+    }
+
+    #[test]
+    fn test_print_progress_with_special_chars() {
+        print_progress("Progress with special chars: \t\n\r\"'\\");
+    }
+
+    #[test]
+    fn test_print_error_function_exists() {
+        // Verify function signature
+        let _ = print_error as fn(&str);
+    }
+
+    #[test]
+    fn test_print_warning_function_exists() {
+        // Verify function signature
+        let _ = print_warning as fn(&str);
+    }
+
+    #[test]
+    fn test_print_info_function_exists() {
+        // Verify function signature
+        let _ = print_info as fn(&str);
+    }
+
+    #[test]
+    fn test_print_progress_function_exists() {
+        // Verify function signature
+        let _ = print_progress as fn(&str);
+    }
+
+    #[test]
+    fn test_multiple_prints_in_sequence() {
+        // Test that multiple prints work without interfering
+        print_error("First error");
+        print_warning("Second warning");
+        print_info("Third info");
+        print_progress("Fourth progress");
+    }
+
+    #[test]
+    fn test_print_functions_with_newlines() {
+        print_error("Error\nwith\nnewlines");
+        print_warning("Warning\nwith\nnewlines");
+        print_info("Info\nwith\nnewlines");
+        // print_progress doesn't add newline, so we skip it
+    }
+
+    #[test]
+    fn test_all_print_functions_are_callable() {
+        // Ensure all public functions are accessible
+        print_error("error");
+        print_warning("warning");
+        print_info("info");
+        print_progress("progress");
+    }
 }
