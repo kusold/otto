@@ -273,6 +273,18 @@ cargo build
 cargo test
 ```
 
+### Test Coverage
+
+This project uses `cargo-llvm-cov` for code coverage measurement:
+
+```bash
+make test-cov         # Terminal output
+make test-cov-html    # HTML report in coverage/
+make test-cov-open    # Generate and open HTML report
+```
+
+For Nix setup instructions and llvm-tools requirements, see [RUST-Nix.md](RUST-Nix.md#test-coverage).
+
 ### Development Shell (Nix)
 
 ```bash

@@ -159,3 +159,70 @@ overlays = import ./overlay (rust-overlay.overlays.default);
 - [rust-overlay repository](https://github.com/oxalica/rust-overlay)
 - [Rust on NixOS Wiki](https://nixos.wiki/wiki/Rust)
 - [cargo2nix Discussion - Best way to use latest Rust toolchain on NixOS](https://www.reddit.com/r/rust/comments/173hkrf/best_way_to_use_latest_rust_toolchain_on_nixos/)
+
+## Test Coverage
+
+This project uses `cargo-llvm-cov` for code coverage measurement.
+
+### Installation
+
+The `cargo-llvm-cov` tool should be installed via cargo:
+```bash
+cargo install cargo-llvm-cov
+```
+
+### Nix Setup
+
+The Nix-provided Rust toolchain via rust-overlay doesn't include the `llvm-tools-preview` component required by `cargo-llvm-cov`. To use coverage with Nix, you have two options:
+
+**Option 1: Use rustup alongside Nix**
+```bash
+# Install rustup (if not already installed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Add llvm-tools-preview component
+rustup component add llvm-tools-preview
+
+# Run coverage
+make test-cov
+```
+
+**Option 2: Add fenix to your Nix setup**
+
+Fenix provides Rust toolchains with all components. You can add it to your `flake.nix`:
+
+```nix
+inputs = {
+  # ... existing inputs
+  fenix = {
+    url = "github:nix-community/fenix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
+};
+
+# In perSystem:
+devShells.default = rustPkgs.workspaceShell {
+  packages = with pkgs; [
+    pkg-config
+    prek
+    inputs.fenix.packages.${system}.stable.withComponents [
+      "cargo"
+      "rustc"
+      "rust-src"
+      "rust-std"
+      "llvm-tools"  # Required for cargo-llvm-cov
+    ]
+  ];
+};
+```
+
+### Running Coverage
+
+Once `cargo-llvm-cov` is installed and `llvm-tools-preview` is available:
+```bash
+make test-cov         # Terminal output
+make test-cov-html    # HTML report in coverage/
+make test-cov-open    # Generate and open HTML report
+```
+
+Coverage reports are generated in the `coverage/` directory (automatically ignored by git).

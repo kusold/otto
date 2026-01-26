@@ -3,3 +3,4 @@
 result-bin
 .beads/*.sock
 .beads/export-state/
+coverage/
