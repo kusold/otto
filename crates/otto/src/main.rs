@@ -1792,52 +1792,45 @@ fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
     use std::thread;
     use std::time::Duration;
 
-    // Get the parent PID of this process
-    let current_pid = std::process::id();
-    let output = Command::new("ps")
-        .args(["-o", "ppid=", "-p", &current_pid.to_string()])
+    // Find Claude processes using pgrep
+    // Look for processes with "claude" in their name
+    let output = Command::new("pgrep")
+        .args(["-f", "claude"])
         .output();
 
-    let parent_pid = match output {
-        Ok(output) => {
+    let claude_pids: Vec<u32> = match output {
+        Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            stdout.trim().parse::<u32>().unwrap_or(0)
+            stdout
+                .lines()
+                .filter_map(|line| line.trim().parse::<u32>().ok())
+                .collect()
         }
-        Err(_) => {
-            return Err("Could not determine parent PID".to_string());
+        _ => {
+            return Err("No Claude processes found".to_string());
         }
     };
 
-    if parent_pid == 0 {
-        return Err("Could not determine parent PID".to_string());
+    if claude_pids.is_empty() {
+        return Err("No Claude processes found".to_string());
     }
 
-    // Verify parent process exists
-    let output = Command::new("ps")
-        .args(["-p", &parent_pid.to_string()])
-        .output();
-
-    match output {
-        Ok(output) if output.status.success() => {}
-        _ => {
-            return Err("Parent process does not exist".to_string());
-        }
+    // Send SIGTERM to all Claude processes for graceful shutdown
+    for pid in &claude_pids {
+        let _ = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .output();
     }
 
-    // Send SIGTERM for graceful shutdown
-    let _ = Command::new("kill")
-        .args(["-TERM", &parent_pid.to_string()])
-        .output();
-
-    // Wait for process to terminate with timeout
+    // Wait for processes to terminate with timeout
     for _ in 0..timeout {
-        let output = Command::new("ps")
-            .args(["-p", &parent_pid.to_string()])
+        let output = Command::new("pgrep")
+            .args(["-f", "claude"])
             .output();
 
         match output {
             Ok(output) if !output.status.success() => {
-                // Process terminated
+                // All Claude processes terminated
                 return Ok(());
             }
             _ => {
@@ -1847,20 +1840,33 @@ fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
     }
 
     // Timeout - force kill with SIGKILL
-    let _ = Command::new("kill")
-        .args(["-KILL", &parent_pid.to_string()])
+    let output = Command::new("pgrep")
+        .args(["-f", "claude"])
         .output();
+
+    if let Ok(output) = output {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            for line in stdout.lines() {
+                if let Ok(pid) = line.trim().parse::<u32>() {
+                    let _ = Command::new("kill")
+                        .args(["-KILL", &pid.to_string()])
+                        .output();
+                }
+            }
+        }
+    }
 
     thread::sleep(Duration::from_secs(1));
 
     // Final check
-    let output = Command::new("ps")
-        .args(["-p", &parent_pid.to_string()])
+    let output = Command::new("pgrep")
+        .args(["-f", "claude"])
         .output();
 
     match output {
         Ok(output) if !output.status.success() => Ok(()),
-        Ok(_) => Err("Failed to terminate Claude process".to_string()),
+        Ok(_) => Err("Failed to terminate all Claude processes".to_string()),
         Err(_) => Ok(()),
     }
 }
