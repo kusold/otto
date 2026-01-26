@@ -323,9 +323,10 @@ pub fn wait_for_claude_in_pane_with_progress(
 
     // Verify Claude actually started
     if !is_claude_active_in_pane(Some(pane_spec))? {
-        // Claude never started - this might be okay if it exited very quickly
-        // or if there was an error. Return success to avoid blocking.
-        return Ok(());
+        // Claude never started - this is an error condition
+        return Err(AgentError::AgentStartFailed(
+            format!("Claude did not start in pane '{}' within {} seconds", pane_spec, timeout_secs)
+        ));
     }
 
     // Phase 2: Wait for Claude to STOP (become inactive)
