@@ -16,6 +16,7 @@ make test-integration
 ./tests/test-otto-done-beads.sh
 ./tests/test-otto-done-exit.sh
 ./tests/test-otto-done-edge-cases.sh
+./tests/test-otto-spawn-workspace.sh
 ```
 
 ### Run all tests (including other test suites):
@@ -73,6 +74,19 @@ Tests edge cases and unusual scenarios.
 - Multiple beads in progress
 
 **Tests: 5 | Coverage: Edge cases (some skipped)**
+
+### `test-otto-spawn-workspace.sh`
+Tests spawn command workspace functionality.
+- Default workspace creation
+- --no-workspace flag behavior
+- Explicit workspace path handling
+- Workspace name format (otto-<issue-id>)
+- Branch name format (agent/<workspace-name>-<issue-id>)
+- OTTO_WORKSPACE environment variable
+- .workspace-info metadata file
+- Workspace cleanup on failure
+
+**Tests: 14 | Coverage: All spawn workspace logic**
 
 ## Test Framework
 
@@ -204,7 +218,7 @@ rm -f .beads/hook
 
 ## Test Statistics
 
-- **Total test files:** 5
-- **Total tests:** 57 (52 passing, 5 skipped)
-- **Code coverage:** ~70% of required scenarios
-- **Test runtime:** ~5 seconds
+- **Total test files:** 6
+- **Total tests:** 71 (66 passing, 5 skipped)
+- **Code coverage:** ~75% of required scenarios
+- **Test runtime:** ~6 seconds

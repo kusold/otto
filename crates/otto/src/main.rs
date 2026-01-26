@@ -4,9 +4,7 @@ use otto_beads::{has_ready_tasks, BeadsError};
 use otto_core::{launch_agent_default, start_stuck_window_monitor, AgentError};
 use otto_log::color::{print_error, print_warning};
 use std::path::Path;
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::fs;
 
 /// Global shutdown flag, set by signal handlers
 static SHUTDOWN_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -75,6 +73,7 @@ enum Commands {
     ///
     /// This command spawns a single Claude Code agent to work on a specific issue.
     /// Supports workspace isolation via git worktrees for better separation and cleanup.
+    /// Workspaces are created by default for better isolation.
     Spawn {
         /// Issue ID to spawn an agent for (required)
         ///
@@ -85,10 +84,18 @@ enum Commands {
         /// Workspace path for isolated worktree (optional)
         ///
         /// Creates a git worktree at the specified path for isolated agent work.
-        /// Defaults to ../agents/<name> if not specified.
+        /// If not specified, defaults to ../agents/otto-<issue-id>.
         /// The workspace will be on a unique branch named agent/<workspace-name>-<issue-id>.
         #[arg(long, short = 'w')]
         workspace: Option<String>,
+
+        /// Disable workspace isolation (optional)
+        ///
+        /// If specified, the agent will spawn in the main repository instead of a workspace.
+        /// This flag is mutually exclusive with --workspace.
+        /// Useful for quick tasks or debugging.
+        #[arg(long, conflicts_with = "workspace")]
+        no_workspace: bool,
 
         /// Path to a custom prompt file for Claude Code agents (optional)
         ///
@@ -137,14 +144,15 @@ fn detect_ralph_prompt() -> Option<&'static str> {
 ///
 /// This function:
 /// 1. Validates the issue ID exists in beads
-/// 2. Creates a git worktree if workspace path is specified
+/// 2. Creates a git worktree if workspace is enabled (default behavior)
 /// 3. Sets up the workspace environment (.beads config, OTTO_WORKSPACE env, .workspace-info)
 /// 4. Launches the agent in a tmux window
 /// 5. Returns the window name for the agent
 ///
 /// # Arguments
 /// * `issue_id` - The beads issue ID (e.g., "otto-123")
-/// * `workspace_path` - Optional path for the git worktree
+/// * `workspace_path` - Optional path for the git worktree (None = use default, Some = explicit path)
+/// * `no_workspace` - If true, skip workspace creation entirely
 /// * `prompt_file` - Optional path to a custom prompt file
 ///
 /// # Returns
@@ -153,6 +161,7 @@ fn detect_ralph_prompt() -> Option<&'static str> {
 fn spawn_agent_for_issue(
     issue_id: &str,
     workspace_path: Option<String>,
+    no_workspace: bool,
     _prompt_file: Option<&str>,
 ) -> Result<String, String> {
     use std::fs;
@@ -175,111 +184,150 @@ fn spawn_agent_for_issue(
         }
     }
 
-    // If workspace is specified, create git worktree
-    let workspace_path = workspace_path.unwrap_or_else(|| {
-        // Default workspace path: ../agents/<issue-id>
-        format!("../agents/{}", issue_id)
-    });
-
-    // Resolve workspace path to absolute
-    let workspace_abs = if Path::new(&workspace_path).is_absolute() {
-        workspace_path.clone()
-    } else {
-        // Relative to current directory
-        match std::env::current_dir() {
-            Ok(cwd) => {
-                let path = cwd.join(&workspace_path);
-                path.to_str().unwrap_or(&workspace_path).to_string()
+    // Determine workspace strategy
+    // - If no_workspace is true: run in main repo (workspace_abs = None)
+    // - If workspace_path is Some(path): use explicit path
+    // - If workspace_path is None: use default path ../agents/otto-<issue-id>
+    let workspace_abs = if no_workspace {
+        // No workspace, run in main repo
+        None
+    } else if let Some(path) = workspace_path {
+        // Explicit workspace path provided
+        let abs = if Path::new(&path).is_absolute() {
+            path.clone()
+        } else {
+            // Relative to current directory
+            match std::env::current_dir() {
+                Ok(cwd) => {
+                    let p = cwd.join(&path);
+                    p.to_str().unwrap_or(&path).to_string()
+                }
+                Err(_) => path.clone(),
             }
-            Err(_) => workspace_path.clone(),
-        }
+        };
+        Some(abs)
+    } else {
+        // Default workspace path: ../agents/otto-<issue-id>
+        let default_path = format!("../agents/otto-{}", issue_id);
+        let abs = if Path::new(&default_path).is_absolute() {
+            default_path.clone()
+        } else {
+            // Relative to current directory
+            match std::env::current_dir() {
+                Ok(cwd) => {
+                    let p = cwd.join(&default_path);
+                    p.to_str().unwrap_or(&default_path).to_string()
+                }
+                Err(_) => default_path.clone(),
+            }
+        };
+        Some(abs)
     };
 
-    // Check if workspace already exists
-    if Path::new(&workspace_abs).exists() {
-        return Err(format!("Workspace path already exists: {}", workspace_abs));
-    }
-
-    // Create unique branch name: agent/<workspace-name>-<issue-id>
-    let workspace_name = Path::new(&workspace_abs)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("workspace");
-    let branch_name = format!("agent/{}-{}", workspace_name, issue_id);
-
-
-    // Create git worktree
-    let worktree_output = Command::new("git")
-        .args(["worktree", "add", &workspace_abs, "-b", &branch_name])
-        .output();
-
-    match worktree_output {
-        Ok(output) if output.status.success() => {
-        }
-        Ok(output) => {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Failed to create worktree: {}", stderr));
-        }
-        Err(e) => {
-            return Err(format!("Failed to run git worktree: {}", e));
-        }
-    }
-
-    // Copy .beads config to workspace
-    let beads_src = Path::new(".beads");
-    let beads_dst = Path::new(&workspace_abs).join(".beads");
-
-    if beads_src.exists() {
-        if let Err(e) = fs::create_dir_all(&beads_dst) {
-            cleanup_workspace(&workspace_abs);
-            return Err(format!("Failed to create .beads in workspace: {}", e));
+    // If workspace is enabled, set up the workspace
+    let branch_name = if let Some(ref workspace_abs) = workspace_abs {
+        // Check if workspace already exists
+        if Path::new(workspace_abs).exists() {
+            return Err(format!("Workspace path already exists: {}", workspace_abs));
         }
 
-        // Copy all files from .beads to workspace
-        if let Err(e) = copy_dir_recursive(beads_src, &beads_dst) {
-            cleanup_workspace(&workspace_abs);
-            return Err(format!("Failed to copy .beads to workspace: {}", e));
+        // Create unique branch name: agent/otto-<issue-id>-<hash>
+        // Use the workspace name (last component of path)
+        let workspace_name = Path::new(workspace_abs)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("workspace");
+        let branch_name = format!("agent/{}-{}", workspace_name, issue_id);
+
+
+        // Create git worktree
+        let worktree_output = Command::new("git")
+            .args(["worktree", "add", workspace_abs, "-b", &branch_name])
+            .output();
+
+        match worktree_output {
+            Ok(output) if output.status.success() => {
+            }
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Failed to create worktree: {}", stderr));
+            }
+            Err(e) => {
+                return Err(format!("Failed to run git worktree: {}", e));
+            }
         }
-    }
 
-    // Create .workspace-info file with metadata
-    let workspace_info = Path::new(&workspace_abs).join(".workspace-info");
-    let info_content = format!(
-        "workspace_path={}\nbranch_name={}\nissue_id={}\noriginal_dir={}\n",
-        workspace_abs,
-        branch_name,
-        issue_id,
-        std::env::current_dir()
-            .map(|p| p.to_str().unwrap_or("unknown").to_string())
-            .unwrap_or("unknown".to_string())
-    );
+        // Copy .beads config to workspace
+        let beads_src = Path::new(".beads");
+        let beads_dst = Path::new(workspace_abs).join(".beads");
 
-    if let Err(e) = fs::write(&workspace_info, info_content) {
-        cleanup_workspace(&workspace_abs);
-        return Err(format!("Failed to create .workspace-info: {}", e));
-    }
+        if beads_src.exists() {
+            if let Err(e) = fs::create_dir_all(&beads_dst) {
+                cleanup_workspace(workspace_abs);
+                return Err(format!("Failed to create .beads in workspace: {}", e));
+            }
 
+            // Copy all files from .beads to workspace
+            if let Err(e) = copy_dir_recursive(beads_src, &beads_dst) {
+                cleanup_workspace(workspace_abs);
+                return Err(format!("Failed to copy .beads to workspace: {}", e));
+            }
+        }
 
-    // Set OTTO_WORKSPACE environment variable for the agent
-    unsafe {
-        std::env::set_var("OTTO_WORKSPACE", &workspace_abs);
-    }
+        // Create .workspace-info file with metadata
+        let workspace_info = Path::new(workspace_abs).join(".workspace-info");
+        let info_content = format!(
+            "workspace_path={}\nbranch_name={}\nissue_id={}\noriginal_dir={}\n",
+            workspace_abs,
+            branch_name,
+            issue_id,
+            std::env::current_dir()
+                .map(|p| p.to_str().unwrap_or("unknown").to_string())
+                .unwrap_or("unknown".to_string())
+        );
+
+        if let Err(e) = fs::write(&workspace_info, info_content) {
+            cleanup_workspace(workspace_abs);
+            return Err(format!("Failed to create .workspace-info: {}", e));
+        }
+
+        // Set OTTO_WORKSPACE environment variable for the agent
+        unsafe {
+            std::env::set_var("OTTO_WORKSPACE", workspace_abs);
+        }
+
+        Some(branch_name)
+    } else {
+        // No workspace, run in main repo
+        None
+    };
 
     // Get or create an agent window
     let window_name = otto_tmux::get_or_create_agent_window(otto_tmux::OTTO_SESSION_NAME)
         .map_err(|e| format!("Failed to create tmux window: {}", e))?;
 
-    // Construct the command to run claude in the workspace
-    let cd_command = format!("cd {}", &workspace_abs);
-    let otto_ralph_command = format!("cd {} && otto ralph", &workspace_abs);
-    let agent_command = format!("{} && {}", cd_command, otto_ralph_command);
+    // Construct the command to run claude
+    let agent_command = if let Some(ref workspace_abs) = workspace_abs {
+        // Run in workspace
+        format!("cd {} && otto ralph", workspace_abs)
+    } else {
+        // Run in main repo
+        "otto ralph".to_string()
+    };
 
     // Send the command to the window
     otto_tmux::send_command_to_window(otto_tmux::OTTO_SESSION_NAME, &window_name, &agent_command)
         .map_err(|e| format!("Failed to send command to tmux: {}", e))?;
 
-    println!("Spawned agent for issue {} in workspace: {}", issue_id, workspace_abs);
-    println!("Branch: {}", branch_name);
+    // Print status message
+    if let Some(ref workspace_abs) = workspace_abs {
+        println!("Spawned agent for issue {} in workspace: {}", issue_id, workspace_abs);
+        if let Some(ref branch) = branch_name {
+            println!("Branch: {}", branch);
+        }
+    } else {
+        println!("Spawned agent for issue {} in main repository", issue_id);
+    }
     println!("Window: {}", window_name);
 
     Ok(window_name)
@@ -437,7 +485,7 @@ fn main() {
                 run_single_pass(prompt_file);
             }
         }
-        Some(Commands::Spawn { issue, workspace, prompt_file }) => {
+        Some(Commands::Spawn { issue, workspace, no_workspace, prompt_file }) => {
             // Auto-detect PROMPT_RALPH.md if no prompt file specified
             let prompt_file = if prompt_file.is_none() {
                 detect_ralph_prompt()
@@ -445,7 +493,16 @@ fn main() {
                 prompt_file.as_deref()
             };
 
-            if let Err(e) = spawn_agent_for_issue(&issue, workspace, prompt_file) {
+            // Determine workspace: if no_workspace is true, use None (no workspace)
+            // Otherwise, use Some(workspace) or None (which triggers default workspace)
+            let workspace = if no_workspace {
+                None
+            } else {
+                // If workspace is explicitly provided, use it; otherwise None (will use default)
+                workspace
+            };
+
+            if let Err(e) = spawn_agent_for_issue(&issue, workspace, no_workspace, prompt_file) {
                 print_error(&format!("spawning agent for issue {}: {}", issue, e));
                 std::process::exit(1);
             }

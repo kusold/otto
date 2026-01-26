@@ -196,3 +196,78 @@ cat .beads/terminations.log
 
 This shows all termination events with timestamps, modes, and outcomes.
 
+## Workspace Isolation
+
+Otto supports workspace isolation for agents, allowing them to work in isolated git worktrees.
+
+### Default Behavior
+
+When you spawn an agent for an issue, it will **automatically** create a workspace:
+
+```bash
+otto spawn -i otto-123
+```
+
+This creates:
+- A git worktree at `../agents/otto-123`
+- A unique branch: `agent/otto-123-<hash>`
+- Isolated `.beads` configuration
+- `.workspace-info` metadata file
+
+### Benefits of Workspace Isolation
+
+- **Clean main repository**: No stray files from agent work
+- **Easy cleanup**: Delete workspace when done with `git worktree remove`
+- **Parallel work**: Multiple agents can work in separate workspaces simultaneously
+- **Safety**: Failed experiments don't clutter your main repo
+
+### Disabling Workspace Isolation
+
+To spawn an agent in the main repository (no workspace):
+
+```bash
+otto spawn -i otto-123 --no-workspace
+```
+
+Use this mode for:
+- Quick debugging tasks
+- When you want immediate visibility of changes
+- Simple tasks that don't require isolation
+
+### Custom Workspace Paths
+
+To specify a custom workspace location:
+
+```bash
+otto spawn -i otto-123 --workspace ../agents/my-feature
+```
+
+### Workspace Metadata
+
+Each workspace contains a `.workspace-info` file with metadata:
+
+```
+workspace_path=/path/to/workspace
+branch_name=agent/otto-123-abc123
+issue_id=otto-123
+original_dir=/path/to/main/repo
+```
+
+### Environment Variables
+
+When working in a workspace:
+- `OTTO_WORKSPACE` is set to the workspace path
+- Agents can detect they're in a workspace and adjust behavior
+
+### Cleanup
+
+To clean up a workspace after completion:
+
+```bash
+# Manual cleanup
+git worktree remove ../agents/otto-123
+
+# Automatic cleanup with otto done (if --nuke flag is used)
+otto done --nuke
+```
+

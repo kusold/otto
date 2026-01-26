@@ -13,6 +13,7 @@ Enable autonomous AFK (away from keyboard) coding by continuously running AI age
 - **Tmux Integration**: Spawns agents in a reusable `otto` tmux session
 - **Graceful Shutdown**: Handles Ctrl+C cleanly, waiting for agents to finish
 - **Beads Integration**: Works with the beads issue tracking system
+- **Workspace Isolation**: Spawns agents in isolated git worktrees for better separation and cleanup
 
 ## Prerequisites
 
@@ -95,6 +96,32 @@ tmux attach-session -t otto
 
 To detach without stopping Otto:
 - Press `Ctrl+B`, then `D` (the default tmux detach keybinding)
+
+### Spawning Agents for Specific Issues
+
+You can spawn an agent to work on a specific issue:
+
+```bash
+# Spawn agent with default workspace (recommended)
+otto spawn -i otto-123
+
+# Spawn agent in main repository (no workspace)
+otto spawn -i otto-123 --no-workspace
+
+# Spawn agent with custom workspace path
+otto spawn -i otto-123 --workspace ../agents/my-feature
+```
+
+**Workspace Isolation** (enabled by default):
+- Creates a git worktree at `../agents/otto-<issue-id>` for isolated work
+- Each workspace gets a unique branch: `agent/otto-<issue-id>-<hash>`
+- Prevents cross-contamination between different agent work
+- Easy cleanup with `git worktree remove` or `otto done --nuke`
+
+**Use `--no-workspace`** when:
+- Working on quick tasks or debugging
+- You want to see changes in the main repository immediately
+- Workspace isolation isn't necessary for the task
 
 ## How It Works
 
