@@ -343,6 +343,7 @@ dependencies = [
  "otto-agent-claude",
  "otto-beads",
  "otto-core",
+ "otto-log",
  "otto-tmux",
  "serde_json",
  "signal-hook",
@@ -362,7 +363,14 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "otto-agent-claude",
+ "otto-log",
  "otto-tmux",
+]
+
+[[package]]
+name = "otto-log"
+version = "0.1.0"
+dependencies = [
  "termcolor",
 ]
 

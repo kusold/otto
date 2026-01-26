@@ -1,7 +1,8 @@
 use clap::{Parser, Subcommand};
 use otto_agent_claude::AbortCallback;
 use otto_beads::{has_ready_tasks, BeadsError};
-use otto_core::{color::print_error, color::print_warning, launch_agent_default, start_stuck_window_monitor, AgentError};
+use otto_core::{launch_agent_default, start_stuck_window_monitor, AgentError};
+use otto_log::color::{print_error, print_warning};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 /// Global shutdown flag, set by signal handlers

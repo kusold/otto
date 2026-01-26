@@ -1,0 +1,7 @@
+[package]
+name = "otto-log"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+termcolor = "1.4"

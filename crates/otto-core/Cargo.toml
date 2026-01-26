@@ -6,5 +6,5 @@ edition.workspace = true
 [dependencies]
 otto-tmux = { path = "../otto-tmux" }
 otto-agent-claude = { path = "../otto-agent-claude" }
-termcolor = "1.4"
+otto-log = { path = "../otto-log" }
 chrono = "0.4"

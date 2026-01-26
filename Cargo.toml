@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/otto", "crates/otto-core", "crates/otto-beads", "crates/otto-tmux", "crates/otto-agent-claude"]
+members = ["crates/otto", "crates/otto-core", "crates/otto-beads", "crates/otto-tmux", "crates/otto-agent-claude", "crates/otto-log"]
 
 [workspace.package]
 version = "0.1.0"

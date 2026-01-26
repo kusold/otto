@@ -12,7 +12,7 @@ use termcolor::{Color, ColorSpec, StandardStream, WriteColor};
 ///
 /// # Example
 /// ```rust
-/// use otto_core::color::print_error;
+/// use otto_log::color::print_error;
 /// print_error("Failed to connect to server");
 /// // Outputs: ✗ Error: Failed to connect to server (in red)
 /// ```
@@ -30,7 +30,7 @@ pub fn print_error(message: &str) {
 ///
 /// # Example
 /// ```rust
-/// use otto_core::color::print_warning;
+/// use otto_log::color::print_warning;
 /// print_warning("Agent timed out");
 /// // Outputs: ⚠ Warning: Agent timed out (in yellow)
 /// ```
@@ -48,7 +48,7 @@ pub fn print_warning(message: &str) {
 ///
 /// # Example
 /// ```rust
-/// use otto_core::color::print_info;
+/// use otto_log::color::print_info;
 /// print_info("Agent working...");
 /// // Outputs: ℹ Info: Agent working... (in blue)
 /// ```
@@ -68,7 +68,7 @@ pub fn print_info(message: &str) {
 ///
 /// # Example
 /// ```rust
-/// use otto_core::color::print_progress;
+/// use otto_log::color::print_progress;
 /// print_progress("Agent working... (1m 23s)");
 /// // Outputs: → Agent working... (1m 23s) (in cyan, no newline)
 /// ```

@@ -3,9 +3,7 @@
 //! Provides the main agent launching logic for spawning Claude Code agents
 //! within tmux sessions.
 
-pub mod color;
-
-use crate::color::print_progress;
+use otto_log::color::print_progress;
 use otto_tmux::{
     capture_pane, ensure_otto_session, get_or_create_agent_window,
     get_pane_pid, get_pane_spec, kill_window, list_windows_by_pattern, send_command_to_window,
