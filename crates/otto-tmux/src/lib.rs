@@ -290,10 +290,75 @@ pub fn get_pane_command(pane_spec: &str) -> TmuxResult<Option<String>> {
     }
 }
 
+/// Gets the currently running command name in a tmux pane.
+///
+/// This function uses tmux's `pane_current_command` format string which
+/// returns the **currently running command** directly, not the shell.
+/// This is more reliable than using `pane_pid` which returns the shell's PID.
+///
+/// # Arguments
+/// * `pane_spec` - The pane specification (e.g., "otto:0.0" for session otto, window 0, pane 0)
+///
+/// # Returns
+/// - `Ok(Some(String))` containing the command name if a process is running
+/// - `Ok(None)` if the pane exists but no process is running
+/// - `Err(TmuxError::PaneProcessQueryFailed)` if the query fails
+/// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
+///
+/// # Example
+/// ```rust
+/// use otto_tmux::get_pane_current_command;
+///
+/// match get_pane_current_command("otto:0.0") {
+///     Ok(Some(cmd)) => println!("Running: {}", cmd),
+///     Ok(None) => println!("No command running in pane"),
+///     Err(e) => eprintln!("Error: {}", e),
+/// }
+/// ```
+pub fn get_pane_current_command(pane_spec: &str) -> TmuxResult<Option<String>> {
+    if !is_tmux_available() {
+        return Err(TmuxError::TmuxNotAvailable);
+    }
+
+    // Validate pane spec format (basic check)
+    if !pane_spec.contains(':') || !pane_spec.contains('.') {
+        return Err(TmuxError::InvalidPaneSpec(pane_spec.to_string()));
+    }
+
+    // Use tmux to get the pane's current command
+    // The format "#{pane_current_command}" is a tmux format string that returns the currently running command
+    let output = Command::new("tmux")
+        .args(["display-message", "-t", pane_spec, "-p", "#{pane_current_command}"])
+        .output();
+
+    match output {
+        Ok(output) if output.status.success() => {
+            let command = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+            // If tmux returned an empty string or error, the pane might not exist
+            if command.is_empty() {
+                return Ok(None);
+            }
+
+            Ok(Some(command))
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // If the pane doesn't exist, return None
+            if stderr.contains("can't find pane") || stderr.contains("no such pane") {
+                return Ok(None);
+            }
+            Err(TmuxError::PaneProcessQueryFailed(stderr.to_string()))
+        }
+        Err(e) => Err(TmuxError::PaneProcessQueryFailed(e.to_string())),
+    }
+}
+
 /// Checks if a specific process name is running in a tmux pane.
 ///
-/// This is a convenience function that combines getting the pane command
-/// and checking if it contains a specific process name.
+/// This is a convenience function that uses `pane_current_command` to check
+/// if a specific process is running. This is more reliable than the old method
+/// which used `pane_pid` and checked the shell's command line.
 ///
 /// # Arguments
 /// * `pane_spec` - The pane specification (e.g., "otto:0.0")
@@ -313,10 +378,10 @@ pub fn get_pane_command(pane_spec: &str) -> TmuxResult<Option<String>> {
 /// }
 /// ```
 pub fn is_process_in_pane(pane_spec: &str, process_name: &str) -> TmuxResult<bool> {
-    match get_pane_command(pane_spec)? {
+    match get_pane_current_command(pane_spec)? {
         Some(command) => {
-            // Check if the command line contains the process name
-            // This handles cases like "/usr/bin/claude" or "claude --arg"
+            // Check if the command name contains the process name
+            // This handles cases like "claude", "/usr/bin/claude", etc.
             Ok(command.contains(process_name))
         }
         None => Ok(false),
@@ -584,20 +649,14 @@ pub fn find_idle_agent_window(session_name: &str) -> TmuxResult<Option<String>> 
         let pane_spec = get_pane_spec(session_name, &window_name);
 
         // Check if this window has a Claude process running
-        match get_pane_pid(&pane_spec) {
-            Ok(Some(pid)) => {
-                // Has a process - check if it's Claude
-                let cmdline_path = format!("/proc/{}/cmdline", pid);
-                if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
-                    let command = cmdline.replace('\0', " ");
-                    // If not running Claude, this window is available
-                    if !command.contains("claude") {
-                        return Ok(Some(window_name));
-                    }
-                }
+        // Use is_process_in_pane which correctly checks pane_current_command
+        match is_process_in_pane(&pane_spec, "claude") {
+            Ok(true) => {
+                // Claude is running, skip this window
+                continue;
             }
-            Ok(None) => {
-                // No process running - this window is available
+            Ok(false) => {
+                // Claude is not running, this window is available
                 return Ok(Some(window_name));
             }
             Err(_) => {

@@ -210,11 +210,11 @@ pub fn launch_agent_default(
 /// in the specified pane.
 ///
 /// It works by:
-/// 1. Querying tmux for the PID of the process in the pane
-/// 2. Validating that the PID corresponds to a Claude process
+/// 1. Querying tmux for the currently running command in the pane
+/// 2. Checking if the command is "claude"
 ///
-/// This two-step approach ensures we don't get false positives from
-/// other processes that might be running in the pane.
+/// This approach uses tmux's `pane_current_command` which directly reports
+/// the currently running command, not the shell's PID.
 ///
 /// # Arguments
 /// * `pane_spec` - The pane specification (e.g., "otto:0.0" for session otto, window 0, pane 0)
@@ -237,25 +237,19 @@ pub fn launch_agent_default(
 /// ```
 ///
 /// # Notes
-/// - This function uses /proc filesystem to read process information
-/// - Only works on Linux/Unix systems with /proc support
+/// - Uses tmux's `pane_current_command` to get the currently running command
 /// - Returns false if the pane doesn't exist (rather than an error)
 /// - Handles multiple Claude instances correctly by checking specific panes
 pub fn is_claude_active_in_pane(pane_spec: Option<&str>) -> AgentResult<bool> {
-    use otto_tmux::get_pane_pid;
+    use otto_tmux::is_process_in_pane;
 
     let pane = pane_spec.unwrap_or("otto:0.0");
 
-    // Get the PID of the process in the pane
-    match get_pane_pid(pane)? {
-        Some(pid) => {
-            // Check if this PID is a Claude process
-            Ok(is_claude_process(pid))
-        }
-        None => {
-            // No process running in the pane
-            Ok(false)
-        }
+    // Check if "claude" is the currently running command in the pane
+    // This uses pane_current_command which correctly detects running processes
+    match is_process_in_pane(pane, "claude")? {
+        true => Ok(true),
+        false => Ok(false),
     }
 }
 
