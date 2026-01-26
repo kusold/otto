@@ -16,3 +16,4 @@
 [2026-01-26T02:43:34+00:00] mode=completed status=success issue=otto-zw2 git validation passed, beads synced, bead closed, hook cleared
 [1769398456] mode=completed status=success issue=none git validation passed, beads synced, bead closed
 [1769398480] mode=completed status=success issue=none git validation passed, beads synced, bead closed
+[1769399989] mode=escalated status=success issue=none escalated with state: uncommitted

@@ -11,6 +11,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils.follows = "cargo2nix/flake-utils";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = inputs @ {
@@ -19,6 +23,7 @@
     rust-overlay,
     flake-parts,
     cargo2nix,
+    fenix,
     ...
   }: let
     # Overlay that can be used in other NixOS configurations
@@ -63,6 +68,15 @@
             # Core development tools
             pkg-config
             prek
+
+            # Fenix Rust toolchain with llvm-tools for cargo-llvm-cov
+            inputs.fenix.packages.${system}.stable.withComponents [
+              "cargo"
+              "rustc"
+              "rust-src"
+              "rust-std"
+              "llvm-tools"  # Required for cargo-llvm-cov
+            ]
 
             # Additional tools can be added here, e.g.:
             # tmux

@@ -221,7 +221,7 @@ This creates:
 ### Benefits of Workspace Isolation
 
 - **Clean main repository**: No stray files from agent work
-- **Easy cleanup**: Delete workspace when done with `git worktree remove`
+- **Easy cleanup**: Delete workspace when done with `otto workspace remove`
 - **Parallel work**: Multiple agents can work in separate workspaces simultaneously
 - **Safety**: Failed experiments don't clutter your main repo
 
@@ -246,6 +246,26 @@ To specify a custom workspace location:
 otto spawn -i otto-123 --workspace ../agents/my-feature
 ```
 
+### Workspace Management
+
+The `otto workspace` command provides workspace management functionality:
+
+```bash
+# List all workspaces
+otto workspace list
+
+# Show workspace metadata
+otto workspace show ../agents/otto-123
+
+# Remove a specific workspace
+otto workspace remove ../agents/otto-123
+otto workspace remove ../agents/otto-123 --force  # Skip confirmation
+
+# Remove all workspaces
+otto workspace clean
+otto workspace clean --force  # Skip confirmation
+```
+
 ### Workspace Metadata
 
 Each workspace contains a `.workspace-info` file with metadata:
@@ -268,8 +288,11 @@ When working in a workspace:
 To clean up a workspace after completion:
 
 ```bash
-# Manual cleanup
-git worktree remove ../agents/otto-123
+# Manual cleanup (individual workspace)
+otto workspace remove ../agents/otto-123
+
+# Manual cleanup (all workspaces)
+otto workspace clean
 
 # Automatic cleanup with otto done (if --nuke flag is used)
 otto done --nuke

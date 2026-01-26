@@ -4,6 +4,7 @@ use otto_beads::{has_ready_tasks, BeadsError};
 use otto_core::{launch_agent_default, start_stuck_window_monitor, AgentError};
 use otto_log::color::{print_error, print_warning};
 use std::path::Path;
+use std::str;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 /// Global shutdown flag, set by signal handlers
@@ -153,6 +154,51 @@ enum Commands {
     /// Validates the environment is properly configured for agents to work.
     /// This should be called before starting work to ensure everything is ready.
     PreFlightCheck,
+
+    /// Workspace management commands
+    ///
+    /// Manage git worktrees used as agent workspaces for isolated work.
+    Workspace {
+        #[command(subcommand)]
+        workspace_command: WorkspaceCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum WorkspaceCommands {
+    /// List all workspaces
+    ///
+    /// Shows all git worktrees with their status information.
+    List,
+
+    /// Show workspace metadata
+    ///
+    /// Display detailed information about a specific workspace from its .workspace-info file.
+    Show {
+        /// Path to the workspace
+        path: String,
+    },
+
+    /// Remove a workspace
+    ///
+    /// Remove a specific workspace directory using git worktree remove.
+    Remove {
+        /// Path to the workspace to remove
+        path: String,
+
+        /// Skip confirmation prompt
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Clean up all workspaces
+    ///
+    /// Remove all agent workspaces in the ../agents directory.
+    Clean {
+        /// Skip confirmation prompts
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// Detects if PROMPT_RALPH.md exists in the repository root.
@@ -951,6 +997,126 @@ mod tests {
         match args.command {
             Some(Commands::PreFlightCheck) => {}
             _ => panic!("Expected PreFlightCheck command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_workspace_list() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "workspace", "list"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Workspace { workspace_command }) => {
+                match workspace_command {
+                    WorkspaceCommands::List => {}
+                    _ => panic!("Expected Workspace::List command"),
+                }
+            }
+            _ => panic!("Expected Workspace command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_workspace_show() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "workspace", "show", "../agents/test"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Workspace { workspace_command }) => {
+                match workspace_command {
+                    WorkspaceCommands::Show { path } => {
+                        assert_eq!(path, "../agents/test");
+                    }
+                    _ => panic!("Expected Workspace::Show command"),
+                }
+            }
+            _ => panic!("Expected Workspace command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_workspace_remove() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "workspace", "remove", "../agents/test"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Workspace { workspace_command }) => {
+                match workspace_command {
+                    WorkspaceCommands::Remove { path, force } => {
+                        assert_eq!(path, "../agents/test");
+                        assert!(!force);
+                    }
+                    _ => panic!("Expected Workspace::Remove command"),
+                }
+            }
+            _ => panic!("Expected Workspace command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_workspace_remove_force() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "workspace", "remove", "../agents/test", "--force"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Workspace { workspace_command }) => {
+                match workspace_command {
+                    WorkspaceCommands::Remove { path, force } => {
+                        assert_eq!(path, "../agents/test");
+                        assert!(force);
+                    }
+                    _ => panic!("Expected Workspace::Remove command"),
+                }
+            }
+            _ => panic!("Expected Workspace command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_workspace_clean() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "workspace", "clean"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Workspace { workspace_command }) => {
+                match workspace_command {
+                    WorkspaceCommands::Clean { force } => {
+                        assert!(!force);
+                    }
+                    _ => panic!("Expected Workspace::Clean command"),
+                }
+            }
+            _ => panic!("Expected Workspace command"),
+        }
+    }
+
+    #[test]
+    fn test_args_parsing_workspace_clean_force() {
+        use clap::Parser;
+
+        let args = Args::try_parse_from(["otto", "workspace", "clean", "--force"]);
+        assert!(args.is_ok());
+        let args = args.unwrap();
+        match args.command {
+            Some(Commands::Workspace { workspace_command }) => {
+                match workspace_command {
+                    WorkspaceCommands::Clean { force } => {
+                        assert!(force);
+                    }
+                    _ => panic!("Expected Workspace::Clean command"),
+                }
+            }
+            _ => panic!("Expected Workspace command"),
         }
     }
 }
@@ -1846,6 +2012,534 @@ fn run_pre_flight_check() -> Result<(), String> {
     }
 }
 
+/// Run workspace management commands.
+///
+/// # Arguments
+/// * `command` - The workspace subcommand to execute
+///
+/// # Returns
+/// - `Ok(())` if the command executes successfully
+/// - `Err(String)` if there was an error
+fn run_workspace_command(command: WorkspaceCommands) -> Result<(), String> {
+    use std::process::Command;
+
+    match command {
+        WorkspaceCommands::List => {
+            // Get project root
+            let project_root = std::env::current_dir()
+                .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+            // Get list of worktrees
+            let output = Command::new("git")
+                .args(["worktree", "list"])
+                .output()
+                .map_err(|e| format!("Failed to list worktrees: {}", e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(format!("Failed to list worktrees: {}", stderr));
+            }
+
+            let worktrees_output = String::from_utf8_lossy(&output.stdout);
+
+            // Parse worktree list
+            let mut workspaces = Vec::new();
+            for line in worktrees_output.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.is_empty() {
+                    continue;
+                }
+
+                let path = parts[0];
+
+                // Skip main worktree (project root)
+                if path == project_root.to_str().unwrap_or("") {
+                    continue;
+                }
+
+                // Get branch name (in brackets, e.g., [branch-name])
+                let branch = if parts.len() > 1 {
+                    let branch_part = parts[1..].join(" ");
+                    if branch_part.starts_with('[') && branch_part.ends_with(']') {
+                        branch_part[1..branch_part.len()-1].to_string()
+                    } else if branch_part.contains("detached") {
+                        // Get commit SHA for detached HEAD
+                        Command::new("git")
+                            .args(["-C", path, "rev-parse", "--short", "HEAD"])
+                            .output()
+                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                            .unwrap_or_else(|_| "unknown".to_string())
+                    } else {
+                        "unknown".to_string()
+                    }
+                } else {
+                    "unknown".to_string()
+                };
+
+                // Check if workspace is clean
+                let status = if is_workspace_clean(path) {
+                    "clean"
+                } else {
+                    "dirty"
+                };
+
+                // Get bead ID from .workspace-info
+                let bead_id = std::fs::read_to_string(format!("{}/.workspace-info", path))
+                    .ok()
+                    .and_then(|content| {
+                        content.lines()
+                            .find(|l| l.starts_with("issue_id="))
+                            .and_then(|l| l.strip_prefix("issue_id="))
+                            .map(|s| s.to_string())
+                    })
+                    .unwrap_or_default();
+
+                workspaces.push((path, branch, status, bead_id));
+            }
+
+            // Print results
+            if workspaces.is_empty() {
+                println!("No agent workspaces found");
+                println!();
+                println!("Workspaces are created when using 'otto spawn --workspace <path>'");
+                return Ok(());
+            }
+
+            // Print header
+            println!("{:<22} {:<26} {:<9} {:<11} {}", "WORKSPACE", "BRANCH", "STATUS", "BEAD", "AGE");
+            println!("{}", str::repeat("-", 80));
+
+            // Print each workspace
+            for (path, branch, status, bead_id) in workspaces {
+                // Get relative path
+                let path_buf = Path::new(&path);
+                let rel_path = if let Ok(rel) = path_buf.strip_prefix(&project_root) {
+                    rel.to_str().unwrap_or(&path)
+                } else {
+                    &path
+                };
+
+                // Get workspace age
+                let age = get_workspace_age(&path);
+
+                println!("{:<22} {:<26} {:<9} {:<11} {}", rel_path, branch, status, bead_id, age);
+            }
+
+            Ok(())
+        }
+
+        WorkspaceCommands::Show { path } => {
+            // Resolve path
+            let workspace_path = if Path::new(&path).is_absolute() {
+                path.clone()
+            } else {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(&path).to_str().unwrap_or(path.as_str()).to_string())
+                    .unwrap_or(path.clone())
+            };
+
+            // Check if workspace exists
+            if !Path::new(&workspace_path).exists() {
+                return Err(format!("Workspace path does not exist: {}", workspace_path));
+            }
+
+            // Check if it's a git worktree
+            let output = Command::new("git")
+                .args(["worktree", "list"])
+                .output()
+                .map_err(|e| format!("Failed to list worktrees: {}", e))?;
+
+            let worktrees_output = String::from_utf8_lossy(&output.stdout);
+            let is_worktree = worktrees_output.lines().any(|line| {
+                line.starts_with(&workspace_path)
+            });
+
+            if !is_worktree {
+                println!("Warning: Path is not a known git worktree");
+            }
+
+            // Read .workspace-info file
+            let info_path = format!("{}/.workspace-info", workspace_path);
+            let info_content = std::fs::read_to_string(&info_path);
+
+            match info_content {
+                Ok(content) => {
+                    println!("Workspace: {}", workspace_path);
+                    println!();
+                    println!("Metadata:");
+
+                    for line in content.lines() {
+                        if line.starts_with('#') || line.trim().is_empty() {
+                            continue;
+                        }
+
+                        if let Some((key, value)) = line.split_once('=') {
+                            println!("  {}: {}", key, value);
+                        }
+                    }
+
+                    // Get branch
+                    let output = Command::new("git")
+                        .args(["-C", &workspace_path, "rev-parse", "--abbrev-ref", "HEAD"])
+                        .output();
+
+                    if let Ok(output) = output {
+                        if output.status.success() {
+                            let branch = String::from_utf8_lossy(&output.stdout);
+                            println!("  current_branch: {}", branch.trim());
+                        }
+                    }
+
+                    // Check status
+                    let status = if is_workspace_clean(&workspace_path) {
+                        "clean"
+                    } else {
+                        "dirty"
+                    };
+                    println!("  status: {}", status);
+                }
+                Err(_) => {
+                    println!("Workspace: {}", workspace_path);
+                    println!();
+                    println!("No .workspace-info file found");
+                    println!();
+                    println!("This workspace may have been created manually or the metadata file is missing.");
+                }
+            }
+
+            Ok(())
+        }
+
+        WorkspaceCommands::Remove { path, force } => {
+            // Resolve path
+            let workspace_path = if Path::new(&path).is_absolute() {
+                path.clone()
+            } else {
+                std::env::current_dir()
+                    .map(|cwd| cwd.join(&path).to_str().unwrap_or(path.as_str()).to_string())
+                    .unwrap_or(path.clone())
+            };
+
+            // Check if workspace exists
+            if !Path::new(&workspace_path).exists() {
+                return Err(format!("Workspace path does not exist: {}", workspace_path));
+            }
+
+            // Check if it's a git worktree
+            let output = Command::new("git")
+                .args(["worktree", "list"])
+                .output()
+                .map_err(|e| format!("Failed to list worktrees: {}", e))?;
+
+            let worktrees_output = String::from_utf8_lossy(&output.stdout);
+            let is_worktree = worktrees_output.lines().any(|line| {
+                line.starts_with(&workspace_path)
+            });
+
+            if !is_worktree {
+                println!("Warning: Path is not a known git worktree");
+            }
+
+            // Check if workspace is clean (unless force flag)
+            if !force && !is_workspace_clean(&workspace_path) {
+                return Err("Workspace has uncommitted changes. Commit or stash changes before removing workspace. Use --force to remove anyway.".to_string());
+            }
+
+            // Get workspace info for display
+            let project_root = std::env::current_dir()
+                .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+            let rel_path = Path::new(&workspace_path).strip_prefix(&project_root)
+                .unwrap_or(Path::new(&workspace_path));
+
+            let output = Command::new("git")
+                .args(["-C", &workspace_path, "rev-parse", "--abbrev-ref", "HEAD"])
+                .output();
+
+            let branch = if let Ok(output) = output {
+                if output.status.success() {
+                    String::from_utf8_lossy(&output.stdout).trim().to_string()
+                } else {
+                    "unknown".to_string()
+                }
+            } else {
+                "unknown".to_string()
+            };
+
+            // Show workspace info
+            println!("Workspace: {}", rel_path.display());
+            println!("Branch: {}", branch);
+
+            // Get bead ID
+            let info_path = format!("{}/.workspace-info", workspace_path);
+            if let Ok(content) = std::fs::read_to_string(&info_path) {
+                for line in content.lines() {
+                    if line.starts_with("issue_id=") {
+                        if let Some(bead_id) = line.strip_prefix("issue_id=") {
+                            println!("Bead: {}", bead_id);
+                        }
+                        break;
+                    }
+                }
+            }
+
+            println!();
+
+            // Confirm removal
+            if !force {
+                print!("Remove workspace '{}'? [y/N] ", rel_path.display());
+                use std::io::Write;
+                std::io::stdout().flush().unwrap();
+
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)
+                    .map_err(|e| format!("Failed to read input: {}", e))?;
+
+                if !input.trim().to_lowercase().starts_with('y') {
+                    println!("Cancelled");
+                    return Ok(());
+                }
+            }
+
+            // Remove worktree
+            let output = Command::new("git")
+                .args(["worktree", "remove", "--force", &workspace_path])
+                .output();
+
+            match output {
+                Ok(output) if output.status.success() => {
+                    println!("✓ Removed workspace {}", rel_path.display());
+                    Ok(())
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    Err(format!("Failed to remove workspace: {}", stderr))
+                }
+                Err(e) => {
+                    Err(format!("Failed to run git worktree remove: {}", e))
+                }
+            }
+        }
+
+        WorkspaceCommands::Clean { force } => {
+            // Get project root
+            let project_root = std::env::current_dir()
+                .map_err(|e| format!("Failed to get current directory: {}", e))?;
+
+            // Get agents directory
+            let agents_dir = project_root.join("../agents");
+
+            if !agents_dir.exists() {
+                println!("No agents directory found");
+                return Ok(());
+            }
+
+            // List all directories in agents
+            let mut workspaces = Vec::new();
+            if let Ok(entries) = std::fs::read_dir(&agents_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        workspaces.push(path);
+                    }
+                }
+            }
+
+            if workspaces.is_empty() {
+                println!("No workspaces found in {}", agents_dir.display());
+                return Ok(());
+            }
+
+            println!("Found {} workspace(s):", workspaces.len());
+            println!();
+
+            for workspace in &workspaces {
+                let rel_path = workspace.strip_prefix(&project_root).unwrap_or(workspace);
+                println!("  - {}", rel_path.display());
+            }
+
+            println!();
+
+            // Confirm removal
+            if !force {
+                print!("Remove all workspaces? [y/N] ");
+                use std::io::Write;
+                std::io::stdout().flush().unwrap();
+
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)
+                    .map_err(|e| format!("Failed to read input: {}", e))?;
+
+                if !input.trim().to_lowercase().starts_with('y') {
+                    println!("Cancelled");
+                    return Ok(());
+                }
+            }
+
+            // Remove each workspace
+            let mut removed = 0;
+            let mut failed = 0;
+
+            for workspace in &workspaces {
+                let output = Command::new("git")
+                    .args(["worktree", "remove", "--force", workspace.to_str().unwrap()])
+                    .output();
+
+                match output {
+                    Ok(output) if output.status.success() => {
+                        let rel_path = workspace.strip_prefix(&project_root).unwrap_or(workspace);
+                        println!("✓ Removed {}", rel_path.display());
+                        removed += 1;
+                    }
+                    _ => {
+                        let rel_path = workspace.strip_prefix(&project_root).unwrap_or(workspace);
+                        println!("✗ Failed to remove {}", rel_path.display());
+                        failed += 1;
+                    }
+                }
+            }
+
+            // Prune orphaned worktrees
+            println!();
+            let _ = Command::new("git")
+                .args(["worktree", "prune"])
+                .output();
+
+            println!();
+            println!("Removed: {} workspace(s)", removed);
+            if failed > 0 {
+                println!("Failed: {} workspace(s)", failed);
+            }
+
+            Ok(())
+        }
+    }
+}
+
+/// Check if a workspace is clean (no uncommitted changes).
+///
+/// # Arguments
+/// * `workspace_path` - Path to the workspace
+///
+/// # Returns
+/// - `true` if the workspace is clean
+/// - `false` if the workspace has uncommitted changes
+fn is_workspace_clean(workspace_path: &str) -> bool {
+    use std::process::Command;
+
+    // Check for unstaged changes
+    let output = Command::new("git")
+        .args(["-C", workspace_path, "diff", "--quiet"])
+        .output();
+
+    let unstaged_ok = matches!(output, Ok(output) if output.status.success());
+
+    // Check for staged changes
+    let output = Command::new("git")
+        .args(["-C", workspace_path, "diff", "--cached", "--quiet"])
+        .output();
+
+    let staged_ok = matches!(output, Ok(output) if output.status.success());
+
+    // Check for untracked files (excluding .workspace-info and .beads)
+    let output = Command::new("git")
+        .args(["-C", workspace_path, "ls-files", "--others", "--exclude-standard"])
+        .output();
+
+    let untracked_ok = if let Ok(output) = output {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.lines()
+            .all(|line| line == ".workspace-info" || line.starts_with(".beads/"))
+    } else {
+        false
+    };
+
+    unstaged_ok && staged_ok && untracked_ok
+}
+
+/// Get workspace age in human-readable format.
+///
+/// # Arguments
+/// * `workspace_path` - Path to the workspace
+///
+/// # Returns
+/// - Human-readable age string (e.g., "1h", "2d", "30m")
+fn get_workspace_age(workspace_path: &str) -> String {
+    use std::process::Command;
+
+    // Try to get the first commit timestamp on the branch
+    let output = Command::new("git")
+        .args(["-C", workspace_path, "rev-list", "--max-parents=0", "HEAD"])
+        .output();
+
+    if let Ok(output) = output {
+        if output.status.success() {
+            let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !commit.is_empty() {
+                let output = Command::new("git")
+                    .args(["-C", workspace_path, "show", "-s", "--format=%ct", &commit])
+                    .output();
+
+                if let Ok(output) = output {
+                    if output.status.success() {
+                        let timestamp = String::from_utf8_lossy(&output.stdout).trim().parse().unwrap_or(0);
+
+                        use std::time::{SystemTime, UNIX_EPOCH};
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+
+                        let age = now.saturating_sub(timestamp);
+                        let days = age / 86400;
+                        let hours = age / 3600;
+                        let minutes = age / 60;
+
+                        if days > 0 {
+                            return format!("{}d", days);
+                        } else if hours > 0 {
+                            return format!("{}h", hours);
+                        } else {
+                            return format!("{}m", minutes);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: check directory modification time
+    if let Ok(metadata) = std::fs::metadata(workspace_path) {
+        if let Ok(modified) = metadata.modified() {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let modified_time = modified
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            let age = now.saturating_sub(modified_time);
+            let days = age / 86400;
+            let hours = age / 3600;
+            let minutes = age / 60;
+
+            if days > 0 {
+                return format!("{}d", days);
+            } else if hours > 0 {
+                return format!("{}h", hours);
+            } else {
+                return format!("{}m", minutes);
+            }
+        }
+    }
+
+    "unknown".to_string()
+}
+
 /// Sets up signal handlers for SIGINT (Ctrl+C) and SIGTERM.
 ///
 /// Signal handling behavior:
@@ -1960,6 +2654,12 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Commands::Workspace { workspace_command }) => {
+            if let Err(e) = run_workspace_command(workspace_command) {
+                print_error(&format!("otto workspace: {}", e));
+                std::process::exit(1);
+            }
+        }
         None => {
             // No subcommand provided, print help
             println!("Otto - Autonomous agent runner for beads tasks\n");
@@ -1971,6 +2671,7 @@ fn main() {
             println!("  spawn            Spawn a single agent for a specific issue");
             println!("  done             Agent self-termination with cleanup");
             println!("  pre-flight-check Validate environment before agent work");
+            println!("  workspace        Manage git worktrees for agent workspaces");
             println!("\nFlags:");
             println!("  -h, --help     Print help");
             println!("  -V, --version  Print version");
@@ -1988,6 +2689,8 @@ fn main() {
             println!("  otto done               Terminate with completed mode");
             println!("  otto done --mode escalated  Escalate (skip validation)");
             println!("  otto pre-flight-check  Validate environment before starting work");
+            println!("  otto workspace list    List all workspaces");
+            println!("  otto workspace clean   Remove all workspaces");
         }
     }
 }

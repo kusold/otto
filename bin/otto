@@ -86,7 +86,7 @@ main() {
             ;;
         workspace)
             log_debug "Executing 'otto workspace' with args: $*"
-            exec "$SCRIPT_DIR/otto-workspace.sh" "$@"
+            exec "$PROJECT_ROOT/target/release/otto" workspace "$@"
             ;;
         help|--help|-h)
             show_help
