@@ -29,7 +29,7 @@ args@{
   cargoConfig ? {},
 }:
 let
-  nixifiedLockHash = "6537daad79d686694dc6eefca53a2444940447205b84e53ed600188593fee042";
+  nixifiedLockHash = "071c85ee18a2793ec404556dc2323706aafbabdecc608bbb80404434b4c19693";
   workspaceSrc = if args.workspaceSrc == null then ./. else args.workspaceSrc;
   currentLockHash = builtins.hashFile "sha256" (workspaceSrc + /Cargo.lock);
   lockHashIgnored = if ignoreLockHash

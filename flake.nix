@@ -68,15 +68,7 @@
             # Core development tools
             pkg-config
             prek
-
-            # Fenix Rust toolchain with llvm-tools for cargo-llvm-cov
-            inputs.fenix.packages.${system}.stable.withComponents [
-              "cargo"
-              "rustc"
-              "rust-src"
-              "rust-std"
-              "llvm-tools"  # Required for cargo-llvm-cov
-            ]
+            cargo-llvm-cov
 
             # Additional tools can be added here, e.g.:
             # tmux
@@ -84,8 +76,21 @@
             # jq
           ];
 
+          # Add fenix toolchain with llvm-tools for cargo-llvm-cov
+          # We need to add these to buildInputs instead
+          buildInputs = with pkgs; [
+            inputs.fenix.packages.${system}.stable.cargo
+            inputs.fenix.packages.${system}.stable.rustc
+            inputs.fenix.packages.${system}.stable.rust-src
+            inputs.fenix.packages.${system}.stable.llvm-tools
+          ];
+
           # Environment variables
           shellHook = ''
+            # Set up environment for cargo-llvm-cov
+            export LLVM_PROFDATA="${inputs.fenix.packages.${system}.stable.llvm-tools}/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-profdata"
+            export LLVM_COV="${inputs.fenix.packages.${system}.stable.llvm-tools}/lib/rustlib/x86_64-unknown-linux-gnu/bin/llvm-cov"
+
             # Welcome message
             echo "🔧 Otto development environment"
             echo "Rust version: $(rustc --version)"
