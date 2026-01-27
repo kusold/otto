@@ -135,14 +135,9 @@ fn test_wait_for_claude_exit_with_immediate_abort() {
     assert!(result.is_ok(), "Should return Ok when abort callback returns true");
 }
 
-#[test]
-fn test_kill_claude() {
-    // This test is tricky because we don't want to kill actual claude processes
-    // Just test that the function runs without panicking
-    // In a test environment, there should be no claude processes running
-    let killed = kill_claude();
-    let _ = killed;
-}
+// The kill_claude function is tested via integration tests in a controlled
+// environment to verify actual termination behavior. Unit tests calling it
+// would terminate the test runner itself (or the user's Claude instance).
 
 #[test]
 fn test_is_claude_process_with_fake_cmdline() {

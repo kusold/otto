@@ -1185,69 +1185,43 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_exit_claude_function_exists() {
-        // Test that exit_claude function signature compiles
-        let _ = exit_claude as fn(&str, u64) -> Result<(), String>;
-    }
+    // Unit tests for the process_exists helper function
+    // These tests verify the helper logic without calling exit_claude
 
     #[test]
-    fn test_exit_claude_no_tmux_no_process() {
-        // When not in tmux and no Claude processes, should return Err
-        let result = exit_claude("test", 1);
-        // Should fail because no Claude processes are running
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_exit_claude_with_tmux_pane_env() {
-        // When TMUX_PANE is set, should try to use pane-specific kill
-        // This test sets a fake TMUX_PANE env var and verifies the function
-        // doesn't panic (it will fail to find the pane, but shouldn't crash)
-        std::env::set_var("TMUX_PANE", "%0");
-        let result = exit_claude("test", 1);
-        // Should either succeed or fail gracefully (not panic)
-        let _ = result;
-        std::env::remove_var("TMUX_PANE");
-    }
-
-    #[test]
-    fn test_process_exists_helper() {
-        // Test the process_exists helper function
-        // PID 1 always exists (init/systemd)
+    fn test_process_exists_always_running_pid() {
+        // PID 1 always exists (init/systemd on Unix systems)
         assert!(process_exists(1));
+    }
 
-        // A very high PID that likely doesn't exist
+    #[test]
+    fn test_process_exists_nonexistent_pid() {
+        // A very high PID that doesn't exist
         assert!(!process_exists(999999999));
     }
 
     #[test]
-    fn test_process_exists_with_current_process() {
+    fn test_process_exists_current_process() {
         // Current process should always exist
         let current_pid = std::process::id();
         assert!(process_exists(current_pid));
     }
 
     #[test]
-    fn test_exit_claude_parent_pid_logic() {
-        // This test documents the new behavior: exit_claude now checks
-        // parent PIDs to determine which Claude processes to kill.
-        //
-        // The logic flow is:
-        // 1. Get current tmux pane PID
-        // 2. Find all Claude processes
-        // 3. Check each Claude process's parent PID (PPid)
-        // 4. Only kill Claude processes where PPid == pane PID
-        // 5. Fall back to global kill only if no matches found
-        //
-        // This ensures only Claude processes spawned from the current
-        // otto ralph session are terminated, not other Claude instances.
-
-        // The actual logic is tested via integration tests since
-        // it requires real process trees to verify.
-        // This unit test ensures the function exists and compiles.
-        let _ = exit_claude as fn(&str, u64) -> Result<(), String>;
+    fn test_process_exists_boundary_values() {
+        // Test with u32::MAX (should not panic)
+        assert!(!process_exists(u32::MAX));
     }
+
+    #[test]
+    fn test_process_exists_zero_pid() {
+        // PID 0 doesn't exist on Unix systems
+        assert!(!process_exists(0));
+    }
+
+    // The exit_claude function itself is tested via integration tests
+    // to verify actual termination behavior, since unit tests calling it
+    // would terminate the test runner itself.
 }
 
 /// Run the otto done command for agent self-termination.

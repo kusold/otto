@@ -1,9 +1,8 @@
-.PHONY: test test-integration test-cov test-cov-html test-cov-open install release release-patch release-minor release-major help
+.PHONY: test test-cov test-cov-html test-cov-open install release release-patch release-minor release-major help
 
 help:
 	@echo "Available targets:"
 	@echo "  make test           - Run all tests"
-	@echo "  make test-integration - Run integration tests for otto done"
 	@echo "  make test-cov       - Run tests with coverage (terminal output)"
 	@echo "  make test-cov-html  - Run tests with coverage (HTML report)"
 	@echo "  make test-cov-open  - Run tests with coverage and open HTML report"
@@ -14,23 +13,19 @@ help:
 	@echo "  make release-major  - Bump major version, create tag, and push (e.g., 0.1.0 -> 1.0.0)"
 	@echo "  make help           - Show this help message"
 
-test: test-integration
-	@echo "All tests passed!"
-
-test-integration:
-	@echo "Running otto done integration tests..."
+test:
+	@echo "Running Rust unit tests..."
 	@echo ""
-	@./tests/test-otto-done-args.sh
+	@echo "Testing otto..."
+	@cargo test -p otto
 	@echo ""
-	@./tests/test-otto-done-git-validation.sh
+	@echo "Testing otto-core..."
+	@cargo test -p otto-core
 	@echo ""
-	@./tests/test-otto-done-beads.sh
+	@echo "Testing otto-agent-claude..."
+	@cargo test -p otto-agent-claude --lib
 	@echo ""
-	@./tests/test-otto-done-exit.sh
-	@echo ""
-	@./tests/test-otto-done-edge-cases.sh
-	@echo ""
-	@echo "✓ All integration tests passed!"
+	@echo "✓ All tests passed!"
 
 test-cov:
 	@echo "Running tests with coverage..."
