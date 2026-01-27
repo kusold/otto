@@ -2872,7 +2872,12 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                     // frame 0: 3 dots, frame 1: 4 dots, ..., frame 7: 10 dots, frame 8: 3 dots, ...
                     let dot_count = base_dots + (frame % (max_dots - base_dots + 1));
                     let dots = ".".repeat(dot_count);
-                    print!("\rNo ready beads, waiting{}", dots);
+                    // Calculate trailing spaces needed to clear leftover characters from longer messages
+                    // Max line length = "No ready beads, waiting" (23 chars) + max_dots (10) = 33 chars
+                    // Current line length = 23 + dot_count
+                    // Trailing spaces = 33 - (23 + dot_count) = max_dots - dot_count
+                    let trailing_spaces = " ".repeat(max_dots - dot_count);
+                    print!("\rNo ready beads, waiting{}{}", dots, trailing_spaces);
                     std::io::stdout().flush().unwrap();
 
                     std::thread::sleep(std::time::Duration::from_millis(500));
