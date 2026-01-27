@@ -1210,6 +1210,44 @@ mod tests {
         let _ = result;
         std::env::remove_var("TMUX_PANE");
     }
+
+    #[test]
+    fn test_process_exists_helper() {
+        // Test the process_exists helper function
+        // PID 1 always exists (init/systemd)
+        assert!(process_exists(1));
+
+        // A very high PID that likely doesn't exist
+        assert!(!process_exists(999999999));
+    }
+
+    #[test]
+    fn test_process_exists_with_current_process() {
+        // Current process should always exist
+        let current_pid = std::process::id();
+        assert!(process_exists(current_pid));
+    }
+
+    #[test]
+    fn test_exit_claude_parent_pid_logic() {
+        // This test documents the new behavior: exit_claude now checks
+        // parent PIDs to determine which Claude processes to kill.
+        //
+        // The logic flow is:
+        // 1. Get current tmux pane PID
+        // 2. Find all Claude processes
+        // 3. Check each Claude process's parent PID (PPid)
+        // 4. Only kill Claude processes where PPid == pane PID
+        // 5. Fall back to global kill only if no matches found
+        //
+        // This ensures only Claude processes spawned from the current
+        // otto ralph session are terminated, not other Claude instances.
+
+        // The actual logic is tested via integration tests since
+        // it requires real process trees to verify.
+        // This unit test ensures the function exists and compiles.
+        let _ = exit_claude as fn(&str, u64) -> Result<(), String>;
+    }
 }
 
 /// Run the otto done command for agent self-termination.
@@ -1808,11 +1846,15 @@ fn nuke_workspace_helper(
     Ok(())
 }
 
+/// Helper function to check if a process exists
+fn process_exists(pid: u32) -> bool {
+    std::path::Path::new(&format!("/proc/{}", pid)).exists()
+}
+
 /// Exit Claude Code by sending SIGTERM to the current Claude process.
 ///
-/// This function attempts to kill only the Claude process in the current tmux pane,
-/// not all Claude processes globally. If not in a tmux session or if the pane
-/// cannot be detected, it falls back to the old behavior of killing all Claude processes.
+/// This function attempts to kill only Claude processes spawned from the current tmux pane,
+/// not all Claude processes globally. It does this by checking the parent PID of Claude processes.
 ///
 /// # Arguments
 /// * `mode` - Exit mode (for logging purposes)
@@ -1826,11 +1868,10 @@ fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
     use std::thread;
     use std::time::Duration;
 
-    // Try to get the current tmux pane PID
+    // Try to get the current tmux pane PID and kill only Claude processes spawned from it
     // Check if we're in a tmux session by looking for TMUX_PANE environment variable
     if let Ok(pane_id) = std::env::var("TMUX_PANE") {
-        // We're in a tmux session, try to kill only the Claude in this pane
-        // Use pane_current_command to check if claude is running
+        // We're in a tmux session, try to kill only Claude processes spawned from this pane
         let output = Command::new("tmux")
             .args(["display-message", "-p", "-t", &pane_id, "#{pane_pid}"])
             .output();
@@ -1838,31 +1879,72 @@ fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
         if let Ok(output) = output {
             if output.status.success() {
                 let pid_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if let Ok(pid) = pid_str.parse::<u32>() {
-                    // Check if this is a Claude process by examining /proc
-                    let cmdline_path = format!("/proc/{}/cmdline", pid);
-                    if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
-                        if cmdline.contains("claude") {
-                            // This is a Claude process, kill it
-                            let _ = Command::new("kill")
-                                .args(["-TERM", &pid.to_string()])
-                                .output();
+                if let Ok(pane_pid) = pid_str.parse::<u32>() {
+                    // Find all Claude processes and check which ones are children of this pane
+                    let claude_output = Command::new("pgrep")
+                        .args(["-x", "claude"])
+                        .output();
 
-                            // Wait for process to terminate
-                            for _ in 0..timeout {
-                                let _ = Command::new("kill")
-                                    .args(["-0", &pid.to_string()])
-                                    .output();
+                    if let Ok(claude_output) = claude_output {
+                        if claude_output.status.success() {
+                            let claude_pids: Vec<u32> = String::from_utf8_lossy(&claude_output.stdout)
+                                .lines()
+                                .filter_map(|line| line.trim().parse::<u32>().ok())
+                                .collect();
 
-                                thread::sleep(Duration::from_secs(1));
+                            // Find Claude processes whose parent is the pane PID
+                            let mut child_claude_pids = Vec::new();
+                            for claude_pid in claude_pids {
+                                let status_path = format!("/proc/{}/status", claude_pid);
+                                if let Ok(status) = std::fs::read_to_string(&status_path) {
+                                    // Parse PPid from /proc/<pid>/status
+                                    // Format: "PPid:\t<parent_pid>\n"
+                                    for line in status.lines() {
+                                        if line.starts_with("PPid:") {
+                                            let ppid_str = line["PPid:".len()..].trim();
+                                            if let Ok(ppid) = ppid_str.parse::<u32>() {
+                                                if ppid == pane_pid {
+                                                    // This Claude process is a direct child of our pane
+                                                    child_claude_pids.push(claude_pid);
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
                             }
 
-                            // Force kill if still running
-                            let _ = Command::new("kill")
-                                .args(["-KILL", &pid.to_string()])
-                                .output();
+                            // If we found Claude processes spawned from this pane, kill them
+                            if !child_claude_pids.is_empty() {
+                                for pid in &child_claude_pids {
+                                    let _ = Command::new("kill")
+                                        .args(["-TERM", &pid.to_string()])
+                                        .output();
+                                }
 
-                            return Ok(());
+                                // Wait for processes to terminate
+                                for _ in 0..timeout {
+                                    let still_running = child_claude_pids.iter()
+                                        .any(|pid| process_exists(*pid));
+
+                                    if !still_running {
+                                        return Ok(());
+                                    }
+
+                                    thread::sleep(Duration::from_secs(1));
+                                }
+
+                                // Force kill any that are still running
+                                for pid in &child_claude_pids {
+                                    if process_exists(*pid) {
+                                        let _ = Command::new("kill")
+                                            .args(["-KILL", &pid.to_string()])
+                                            .output();
+                                    }
+                                }
+
+                                return Ok(());
+                            }
                         }
                     }
                 }
