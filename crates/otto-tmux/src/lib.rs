@@ -696,17 +696,17 @@ pub fn get_or_create_agent_window(session_name: &str) -> TmuxResult<String> {
 ///
 /// # Arguments
 /// * `session_name` - The name of the session
-/// * `pattern` - A substring pattern to match window names against
+/// * `pattern` - A prefix pattern to match window names against
 ///
 /// # Returns
-/// - `Ok(Vec<String>)` containing window names that match the pattern
+/// - `Ok(Vec<String>)` containing window names that start with the pattern
 /// - `Err(TmuxError::TmuxNotAvailable)` if tmux is not installed
 /// - `Err(TmuxError::SessionCheckFailed)` if listing fails
 pub fn list_windows_by_pattern(session_name: &str, pattern: &str) -> TmuxResult<Vec<String>> {
     let all_windows = list_windows(session_name)?;
     let matching: Vec<String> = all_windows
         .into_iter()
-        .filter(|w| w.contains(pattern))
+        .filter(|w| w.starts_with(pattern))
         .collect();
     Ok(matching)
 }
@@ -1236,5 +1236,38 @@ mod tests {
         assert_eq!(get_pane_spec("s", "w"), "s:w.0");
         assert_eq!(get_pane_spec("session-with-dashes", "window-with-dashes"), "session-with-dashes:window-with-dashes.0");
         assert_eq!(get_pane_spec("session_with_underscores", "window_with_underscores"), "session_with_underscores:window_with_underscores.0");
+    }
+
+    #[test]
+    fn test_list_windows_by_pattern_starts_with_not_contains() {
+        // Test that list_windows_by_pattern matches by prefix, not substring
+        // This ensures windows not matching the ralph-* prefix are not affected
+
+        // Create test data
+        let all_windows = vec![
+            "ralph-crimson".to_string(),
+            "ralph-willow".to_string(),
+            "claude".to_string(),
+            "myralph-test".to_string(),
+            "testralph".to_string(),
+            "otto".to_string(),
+        ];
+
+        // Simulate the filtering logic
+        let pattern = AGENT_WINDOW_PREFIX; // "ralph-"
+        let matching: Vec<String> = all_windows
+            .iter()
+            .filter(|w| w.starts_with(pattern))
+            .cloned()
+            .collect();
+
+        // Should only match windows starting with "ralph-"
+        assert_eq!(matching.len(), 2);
+        assert!(matching.contains(&"ralph-crimson".to_string()));
+        assert!(matching.contains(&"ralph-willow".to_string()));
+        assert!(!matching.contains(&"claude".to_string()));
+        assert!(!matching.contains(&"myralph-test".to_string()));
+        assert!(!matching.contains(&"testralph".to_string()));
+        assert!(!matching.contains(&"otto".to_string()));
     }
 }

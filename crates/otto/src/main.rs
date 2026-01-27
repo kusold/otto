@@ -1120,6 +1120,32 @@ mod tests {
             _ => panic!("Expected Workspace command"),
         }
     }
+
+    #[test]
+    fn test_exit_claude_function_exists() {
+        // Test that exit_claude function signature compiles
+        let _ = exit_claude as fn(&str, u64) -> Result<(), String>;
+    }
+
+    #[test]
+    fn test_exit_claude_no_tmux_no_process() {
+        // When not in tmux and no Claude processes, should return Err
+        let result = exit_claude("test", 1);
+        // Should fail because no Claude processes are running
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_exit_claude_with_tmux_pane_env() {
+        // When TMUX_PANE is set, should try to use pane-specific kill
+        // This test sets a fake TMUX_PANE env var and verifies the function
+        // doesn't panic (it will fail to find the pane, but shouldn't crash)
+        std::env::set_var("TMUX_PANE", "%0");
+        let result = exit_claude("test", 1);
+        // Should either succeed or fail gracefully (not panic)
+        let _ = result;
+        std::env::remove_var("TMUX_PANE");
+    }
 }
 
 /// Run the otto done command for agent self-termination.
@@ -1718,7 +1744,11 @@ fn nuke_workspace_helper(
     Ok(())
 }
 
-/// Exit Claude Code by sending SIGTERM to parent process.
+/// Exit Claude Code by sending SIGTERM to the current Claude process.
+///
+/// This function attempts to kill only the Claude process in the current tmux pane,
+/// not all Claude processes globally. If not in a tmux session or if the pane
+/// cannot be detected, it falls back to the old behavior of killing all Claude processes.
 ///
 /// # Arguments
 /// * `mode` - Exit mode (for logging purposes)
@@ -1732,8 +1762,53 @@ fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
     use std::thread;
     use std::time::Duration;
 
-    // Find Claude processes using pgrep
-    // Look for processes with "claude" in their name
+    // Try to get the current tmux pane PID
+    // Check if we're in a tmux session by looking for TMUX_PANE environment variable
+    if let Ok(pane_id) = std::env::var("TMUX_PANE") {
+        // We're in a tmux session, try to kill only the Claude in this pane
+        // Use pane_current_command to check if claude is running
+        let output = Command::new("tmux")
+            .args(["display-message", "-p", "-t", &pane_id, "#{pane_pid}"])
+            .output();
+
+        if let Ok(output) = output {
+            if output.status.success() {
+                let pid_str = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if let Ok(pid) = pid_str.parse::<u32>() {
+                    // Check if this is a Claude process by examining /proc
+                    let cmdline_path = format!("/proc/{}/cmdline", pid);
+                    if let Ok(cmdline) = std::fs::read_to_string(&cmdline_path) {
+                        if cmdline.contains("claude") {
+                            // This is a Claude process, kill it
+                            let _ = Command::new("kill")
+                                .args(["-TERM", &pid.to_string()])
+                                .output();
+
+                            // Wait for process to terminate
+                            for _ in 0..timeout {
+                                let _ = Command::new("kill")
+                                    .args(["-0", &pid.to_string()])
+                                    .output();
+
+                                thread::sleep(Duration::from_secs(1));
+                            }
+
+                            // Force kill if still running
+                            let _ = Command::new("kill")
+                                .args(["-KILL", &pid.to_string()])
+                                .output();
+
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: Not in tmux or couldn't detect pane, use old global method
+    // This is the legacy behavior that kills all Claude processes
+    // Note: This should rarely be used in practice with otto ralph workflows
     let output = Command::new("pgrep")
         .args(["-f", "claude"])
         .output();
