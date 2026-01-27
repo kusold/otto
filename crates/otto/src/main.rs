@@ -3,6 +3,7 @@ use otto_agent_claude::AbortCallback;
 use otto_beads::{has_ready_tasks, BeadsError};
 use otto_core::{launch_agent_default, start_stuck_window_monitor, AgentError};
 use otto_log::color::{print_error, print_warning};
+use std::io::Write;
 use std::path::Path;
 use std::str;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -2859,17 +2860,29 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                 }
             }
             Ok(false) => {
-                // No ready beads, wait a bit before checking again
-                println!("No ready beads, waiting...");
+                // No ready beads, wait a bit before checking again with animation
+                // Animate growing dots: ... -> .... -> ..... -> .......... (10 dots max)
+                // Total animation time: 10 seconds (0.5s per frame, 20 frames)
+                let base_dots = 3;
+                let max_dots = 10;
+                let frames = 20; // 10 seconds / 0.5 seconds per frame
 
-                // Sleep in 1-second intervals to allow shutdown checking
-                for _ in 0..10 {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
+                for frame in 0..frames {
+                    // Calculate dots: cycle from 3 to 10, then back to 3
+                    // frame 0: 3 dots, frame 1: 4 dots, ..., frame 7: 10 dots, frame 8: 3 dots, ...
+                    let dot_count = base_dots + (frame % (max_dots - base_dots + 1));
+                    let dots = ".".repeat(dot_count);
+                    print!("\rNo ready beads, waiting{}", dots);
+                    std::io::stdout().flush().unwrap();
+
+                    std::thread::sleep(std::time::Duration::from_millis(500));
                     if SHUTDOWN_REQUESTED.load(Ordering::SeqCst) {
+                        println!(); // End the animation line
                         println!("Shutting down gracefully");
                         return;
                     }
                 }
+                println!(); // End the animation line before continuing
             }
             Err(BeadsError::NotInitialized) => {
                 print_error("beads not initialized (no .beads directory)");
