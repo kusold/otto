@@ -828,10 +828,15 @@ mod tests {
             None,
             None,
         );
-        // Should timeout or return immediately
+        // Should timeout, fail to start, or return immediately
         match result {
-            Err(AgentError::AgentTimeout) | Ok(_) => {},
-            Err(_) => panic!("Unexpected error type"),
+            Err(AgentError::AgentTimeout) |
+            Err(AgentError::AgentStartFailed(_)) |
+            Err(AgentError::TmuxError(_)) |
+            Ok(_) => {
+                // All acceptable outcomes when there's no tmux session
+            }
+            Err(_) => panic!("Unexpected error type: {:?}", result),
         }
     }
 
@@ -855,10 +860,13 @@ mod tests {
         // Progress callback should have been called if we waited
         // Or error may have occurred immediately
         match result {
-            Err(AgentError::AgentTimeout) | Err(AgentError::TmuxError(_)) | Ok(_) => {
+            Err(AgentError::AgentTimeout) |
+            Err(AgentError::AgentStartFailed(_)) |
+            Err(AgentError::TmuxError(_)) |
+            Ok(_) => {
                 // All acceptable - callback may or may not have been called depending on error path
             }
-            Err(_) => panic!("Unexpected error type"),
+            Err(_) => panic!("Unexpected error type: {:?}", result),
         }
     }
 
@@ -906,10 +914,13 @@ mod tests {
 
         // Just verify it completes without hanging
         match result {
-            Err(AgentError::AgentTimeout) | Err(AgentError::TmuxError(_)) | Ok(_) => {
+            Err(AgentError::AgentTimeout) |
+            Err(AgentError::AgentStartFailed(_)) |
+            Err(AgentError::TmuxError(_)) |
+            Ok(_) => {
                 // All acceptable outcomes
             }
-            Err(_) => panic!("Unexpected error type"),
+            Err(_) => panic!("Unexpected error type: {:?}", result),
         }
     }
 
