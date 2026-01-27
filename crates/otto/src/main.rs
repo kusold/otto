@@ -547,6 +547,70 @@ mod tests {
     }
 
     #[test]
+    fn test_waiting_animation_frame_starts_with_carriage_return() {
+        let frame = generate_waiting_animation_frame(0);
+        assert!(frame.starts_with('\r'), "Frame should start with carriage return");
+    }
+
+    #[test]
+    fn test_waiting_animation_frame_no_newlines() {
+        for frame in 0..20 {
+            let frame_str = generate_waiting_animation_frame(frame);
+            assert!(!frame_str.contains('\n'), "Frame {} should not contain newline", frame);
+        }
+    }
+
+    #[test]
+    fn test_waiting_animation_frame_consistent_length() {
+        // All frames should have the same length to properly clear previous content
+        let first_frame = generate_waiting_animation_frame(0);
+        let first_len = first_frame.len();
+
+        for frame in 1..20 {
+            let frame_str = generate_waiting_animation_frame(frame);
+            assert_eq!(
+                frame_str.len(),
+                first_len,
+                "Frame {} should have same length as frame 0",
+                frame
+            );
+        }
+    }
+
+    #[test]
+    fn test_waiting_animation_frame_dots_cycle() {
+        // Frame 0 should have 3 dots (base)
+        let frame0 = generate_waiting_animation_frame(0);
+        assert!(frame0.ends_with("   ")); // 3 dots + trailing spaces
+
+        // Frame 7 should have 10 dots (max)
+        let frame7 = generate_waiting_animation_frame(7);
+        let dots7 = frame7.chars().filter(|&c| c == '.').count();
+        assert_eq!(dots7, 10, "Frame 7 should have 10 dots");
+
+        // Frame 8 should cycle back to 3 dots
+        let frame8 = generate_waiting_animation_frame(8);
+        let dots8 = frame8.chars().filter(|&c| c == '.').count();
+        assert_eq!(dots8, 3, "Frame 8 should cycle back to 3 dots");
+    }
+
+    #[test]
+    fn test_waiting_animation_frame_trailing_spaces_clear_longer_frames() {
+        // Generate a frame with max dots (10 dots)
+        let max_frame = generate_waiting_animation_frame(7);
+        let max_len = max_frame.len();
+
+        // Generate a frame with min dots (3 dots)
+        let min_frame = generate_waiting_animation_frame(0);
+
+        // Both should have the same length (trailing spaces in shorter frame)
+        assert_eq!(min_frame.len(), max_len);
+
+        // The min frame should end with spaces to clear the extra dots
+        assert!(min_frame.ends_with("       "), "Shorter frame should end with trailing spaces");
+    }
+
+    #[test]
     fn test_copy_dir_recursive_empty() {
         let temp_dir = tempfile::tempdir().unwrap();
         let src = temp_dir.path().join("src");
@@ -2891,6 +2955,40 @@ fn run_single_pass(prompt_file: Option<&str>) {
     }
 }
 
+/// Generates a single frame of the waiting animation.
+///
+/// Returns a string that should be printed to stdout with carriage return
+/// to overwrite the previous frame. The string includes trailing spaces
+/// to clear any leftover characters from longer frames.
+///
+/// # Arguments
+/// * `frame` - Frame number (0-indexed). Dots cycle from 3 to 10.
+///
+/// # Returns
+/// A string starting with `\r` followed by the message and appropriate trailing spaces.
+///
+/// # Example
+/// ```
+/// let frame = generate_waiting_animation_frame(0);
+/// assert!(frame.starts_with("\r"));
+/// assert!(!frame.contains("\n")); // No newlines
+/// ```
+fn generate_waiting_animation_frame(frame: u32) -> String {
+    const BASE_DOTS: u32 = 3;
+    const MAX_DOTS: u32 = 10;
+
+    let dot_count = BASE_DOTS + (frame % (MAX_DOTS - BASE_DOTS + 1));
+    let dots = ".".repeat(dot_count as usize);
+
+    // Calculate trailing spaces needed to clear leftover characters from longer messages
+    // Max line length = "No ready beads, waiting" (23 chars) + max_dots (10) = 33 chars
+    // Current line length = 23 + dot_count
+    // Trailing spaces = 33 - (23 + dot_count) = max_dots - dot_count
+    let trailing_spaces = " ".repeat((MAX_DOTS - dot_count) as usize);
+
+    format!("\rNo ready beads, waiting{}{}", dots, trailing_spaces)
+}
+
 fn run_watch_loop(prompt_file: Option<&str>) {
     // Start the stuck window monitoring thread
     let _monitor_handle = start_stuck_window_monitor();
@@ -2938,21 +3036,11 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                 // No ready beads, wait a bit before checking again with animation
                 // Animate growing dots: ... -> .... -> ..... -> .......... (10 dots max)
                 // Total animation time: 10 seconds (0.5s per frame, 20 frames)
-                let base_dots = 3;
-                let max_dots = 10;
                 let frames = 20; // 10 seconds / 0.5 seconds per frame
 
                 for frame in 0..frames {
-                    // Calculate dots: cycle from 3 to 10, then back to 3
-                    // frame 0: 3 dots, frame 1: 4 dots, ..., frame 7: 10 dots, frame 8: 3 dots, ...
-                    let dot_count = base_dots + (frame % (max_dots - base_dots + 1));
-                    let dots = ".".repeat(dot_count);
-                    // Calculate trailing spaces needed to clear leftover characters from longer messages
-                    // Max line length = "No ready beads, waiting" (23 chars) + max_dots (10) = 33 chars
-                    // Current line length = 23 + dot_count
-                    // Trailing spaces = 33 - (23 + dot_count) = max_dots - dot_count
-                    let trailing_spaces = " ".repeat(max_dots - dot_count);
-                    print!("\rNo ready beads, waiting{}{}", dots, trailing_spaces);
+                    let frame_str = generate_waiting_animation_frame(frame);
+                    print!("{}", frame_str);
                     std::io::stdout().flush().unwrap();
 
                     std::thread::sleep(std::time::Duration::from_millis(500));
