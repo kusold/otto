@@ -407,9 +407,11 @@ pub const AGENT_WINDOW_PREFIX: &str = "ralph-";
 /// assert!(name.starts_with("ralph-"));
 /// ```
 pub fn generate_agent_window_name() -> String {
-    // Generate a random short word (1-2 words, lowercase)
-    // petname::petname(number_of_words, separator)
-    let petname = petname::petname(1, "-");
+    // petname 2.0 API: requires Generator trait in scope
+    use petname::Generator;
+    let petname = petname::Petnames::default()
+        .generate_one(1, "-")
+        .unwrap_or_else(|| "agent".to_string());
     format!("{}{}", AGENT_WINDOW_PREFIX, petname)
 }
 
