@@ -2963,6 +2963,8 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                     }
                 }
                 println!(); // End the animation line before continuing
+                print!("\r"); // Move to start of line for next iteration
+                std::io::stdout().flush().unwrap();
             }
             Err(BeadsError::NotInitialized) => {
                 print_error("beads not initialized (no .beads directory)");
