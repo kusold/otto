@@ -1868,9 +1868,14 @@ fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
     use std::thread;
     use std::time::Duration;
 
+    // Track whether we successfully detected tmux and attempted pane-specific logic
+    let mut tmux_detected = false;
+
     // Try to get the current tmux pane PID and kill only Claude processes spawned from it
     // Check if we're in a tmux session by looking for TMUX_PANE environment variable
     if let Ok(pane_id) = std::env::var("TMUX_PANE") {
+        tmux_detected = true;
+
         // We're in a tmux session, try to kill only Claude processes spawned from this pane
         let output = Command::new("tmux")
             .args(["display-message", "-p", "-t", &pane_id, "#{pane_pid}"])
@@ -1944,13 +1949,31 @@ fn exit_claude(_mode: &str, timeout: u64) -> Result<(), String> {
                                 }
 
                                 return Ok(());
+                            } else {
+                                // We're in tmux but found no child Claude processes
+                                // This means no ralph session is running in this pane
+                                // Return success without killing anything
+                                return Ok(());
                             }
                         }
                     }
                 }
             }
         }
+        // If we reach here, we detected tmux but the logic failed
+        // Fall through to the tmux_detected check below
     }
+
+    // If we detected tmux (even if the logic failed), don't use global fallback
+    if tmux_detected {
+        // We detected tmux but something went wrong with pane-specific logic
+        // Return success without killing anything (don't fall back to global kill)
+        return Ok(());
+    }
+
+    // Fallback: Not in tmux, use old global method
+    // This is the legacy behavior that kills all Claude processes
+    // Only used when NOT in a tmux session
 
     // Fallback: Not in tmux or couldn't detect pane, use old global method
     // This is the legacy behavior that kills all Claude processes
