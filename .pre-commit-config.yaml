@@ -1,0 +1,14 @@
+# Pre-commit hooks for otto project
+# See https://github.com/j178/prek
+
+repos:
+  # Check that Cargo.nix is in sync with Cargo.lock
+  - repo: local
+    hooks:
+      - id: cargo-nix-sync
+        name: cargo-nix-sync
+        entry: bin/cargo-nix-sync-check.sh
+        language: script
+        pass_filenames: false
+        # Run before other hooks since this is a critical check
+        stages: [pre-commit]
