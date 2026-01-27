@@ -2962,8 +2962,8 @@ fn run_watch_loop(prompt_file: Option<&str>) {
                         return;
                     }
                 }
-                println!(); // End the animation line before continuing
-                print!("\r"); // Move to start of line for next iteration
+                // Carriage return moves to start of same line for next iteration
+                print!("\r");
                 std::io::stdout().flush().unwrap();
             }
             Err(BeadsError::NotInitialized) => {
