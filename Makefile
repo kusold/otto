@@ -61,6 +61,11 @@ release:
 		echo "Usage: make release VERSION=1.0.0"; \
 		exit 1; \
 	fi
+	@if [ "$(VERSION)" != "$(CURRENT_VERSION)" ]; then \
+		echo "Error: VERSION $(VERSION) does not match Cargo.toml version $(CURRENT_VERSION)"; \
+		echo "Please update Cargo.toml first, or use release-patch/release-minor/release-major"; \
+		exit 1; \
+	fi
 	@echo "Creating release tag v$(VERSION)..."
 	@git tag -a "v$(VERSION)" -m "Release v$(VERSION)"
 	@echo "Pushing tag to remote..."
@@ -76,8 +81,14 @@ release-patch:
 	@echo "Current version: $(CURRENT_VERSION)"
 	@NEW_VERSION=$$(echo $(CURRENT_VERSION) | awk -F. '{print $$1"."$$2"."$$3+1}'); \
 	echo "Bumping to version: $$NEW_VERSION"; \
+	echo "Updating Cargo.toml..."; \
+	sed -i 's/^version = "$(CURRENT_VERSION)"/version = "'$$NEW_VERSION'"/' Cargo.toml && \
+	echo "Committing version bump..."; \
+	git add Cargo.toml && \
+	git commit -m "chore: Bump version to $$NEW_VERSION" && \
 	echo "Creating and pushing tag v$$NEW_VERSION..."; \
 	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
+	git push origin main && \
 	git push origin "v$$NEW_VERSION" && \
 	echo "" && \
 	echo "✓ Release v$$NEW_VERSION tagged and pushed!" && \
@@ -90,8 +101,14 @@ release-minor:
 	@echo "Current version: $(CURRENT_VERSION)"
 	@NEW_VERSION=$$(echo $(CURRENT_VERSION) | awk -F. '{print $$1"."$$2+1".0"}'); \
 	echo "Bumping to version: $$NEW_VERSION"; \
+	echo "Updating Cargo.toml..."; \
+	sed -i 's/^version = "$(CURRENT_VERSION)"/version = "'$$NEW_VERSION'"/' Cargo.toml && \
+	echo "Committing version bump..."; \
+	git add Cargo.toml && \
+	git commit -m "chore: Bump version to $$NEW_VERSION" && \
 	echo "Creating and pushing tag v$$NEW_VERSION..."; \
 	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
+	git push origin main && \
 	git push origin "v$$NEW_VERSION" && \
 	echo "" && \
 	echo "✓ Release v$$NEW_VERSION tagged and pushed!" && \
@@ -104,8 +121,14 @@ release-major:
 	@echo "Current version: $(CURRENT_VERSION)"
 	@NEW_VERSION=$$(echo $(CURRENT_VERSION) | awk -F. '{print $$1+1".0.0"}'); \
 	echo "Bumping to version: $$NEW_VERSION"; \
+	echo "Updating Cargo.toml..."; \
+	sed -i 's/^version = "$(CURRENT_VERSION)"/version = "'$$NEW_VERSION'"/' Cargo.toml && \
+	echo "Committing version bump..."; \
+	git add Cargo.toml && \
+	git commit -m "chore: Bump version to $$NEW_VERSION" && \
 	echo "Creating and pushing tag v$$NEW_VERSION..."; \
 	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
+	git push origin main && \
 	git push origin "v$$NEW_VERSION" && \
 	echo "" && \
 	echo "✓ Release v$$NEW_VERSION tagged and pushed!" && \
