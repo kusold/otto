@@ -52,6 +52,11 @@
 #     - ~/beads-planning  # Personal planning repo
 #     - ~/work-planning   # Work planning repo
 
+# Hook chaining configuration
+hooks:
+  chain_strategy: before  # Run custom hooks before bd hooks (before | after | replace)
+  chain_timeout_ms: 10000  # Timeout for chained hooks
+
 # Integration settings (access with 'bd config get/set')
 # These are stored in the database, not in this file:
 # - jira.url
