@@ -325,7 +325,7 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "otto"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "clap",
  "otto-agent-claude",
@@ -340,15 +340,15 @@ dependencies = [
 
 [[package]]
 name = "otto-agent-claude"
-version = "0.1.0"
+version = "0.1.2"
 
 [[package]]
 name = "otto-beads"
-version = "0.1.0"
+version = "0.1.2"
 
 [[package]]
 name = "otto-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "otto-agent-claude",
@@ -358,14 +358,14 @@ dependencies = [
 
 [[package]]
 name = "otto-log"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "termcolor",
 ]
 
 [[package]]
 name = "otto-tmux"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "petname",
 ]

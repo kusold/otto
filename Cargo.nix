@@ -30,7 +30,7 @@ args@{
   cargoConfig ? {},
 }:
 let
-  nixifiedLockHash = "3237a61e6d7d9c698431452c51e874142dd15d4005f57c1946464ef480a24fc6";
+  nixifiedLockHash = "b2f9ce8dafd475442b3d9c88ce0bd9297bcf68098cdce6c0c26ba2209a4edc7d";
   workspaceSrc = if args.workspaceSrc == null then ./. else args.workspaceSrc;
   currentLockHash = builtins.hashFile "sha256" (workspaceSrc + /Cargo.lock);
   lockHashIgnored = if ignoreLockHash
@@ -59,12 +59,12 @@ in
 {
   cargo2nixVersion = "0.12.0";
   workspace = {
-    otto = rustPackages.unknown.otto."0.1.0";
-    otto-agent-claude = rustPackages.unknown.otto-agent-claude."0.1.0";
-    otto-beads = rustPackages.unknown.otto-beads."0.1.0";
-    otto-core = rustPackages.unknown.otto-core."0.1.0";
-    otto-log = rustPackages.unknown.otto-log."0.1.0";
-    otto-tmux = rustPackages.unknown.otto-tmux."0.1.0";
+    otto = rustPackages.unknown.otto."0.1.2";
+    otto-agent-claude = rustPackages.unknown.otto-agent-claude."0.1.2";
+    otto-beads = rustPackages.unknown.otto-beads."0.1.2";
+    otto-core = rustPackages.unknown.otto-core."0.1.2";
+    otto-log = rustPackages.unknown.otto-log."0.1.2";
+    otto-tmux = rustPackages.unknown.otto-tmux."0.1.2";
   };
   "registry+https://github.com/rust-lang/crates.io-index".android_system_properties."0.1.5" = overridableMkRustCrate (profileName: rec {
     name = "android_system_properties";
@@ -536,18 +536,18 @@ in
     ];
   });
   
-  "unknown".otto."0.1.0" = overridableMkRustCrate (profileName: rec {
+  "unknown".otto."0.1.2" = overridableMkRustCrate (profileName: rec {
     name = "otto";
-    version = "0.1.0";
+    version = "0.1.2";
     registry = "unknown";
     src = fetchCrateLocal workspaceSrc;
     dependencies = {
       clap = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".clap."4.5.55" { inherit profileName; }).out;
-      otto_agent_claude = (rustPackages."unknown".otto-agent-claude."0.1.0" { inherit profileName; }).out;
-      otto_beads = (rustPackages."unknown".otto-beads."0.1.0" { inherit profileName; }).out;
-      otto_core = (rustPackages."unknown".otto-core."0.1.0" { inherit profileName; }).out;
-      otto_log = (rustPackages."unknown".otto-log."0.1.0" { inherit profileName; }).out;
-      otto_tmux = (rustPackages."unknown".otto-tmux."0.1.0" { inherit profileName; }).out;
+      otto_agent_claude = (rustPackages."unknown".otto-agent-claude."0.1.2" { inherit profileName; }).out;
+      otto_beads = (rustPackages."unknown".otto-beads."0.1.2" { inherit profileName; }).out;
+      otto_core = (rustPackages."unknown".otto-core."0.1.2" { inherit profileName; }).out;
+      otto_log = (rustPackages."unknown".otto-log."0.1.2" { inherit profileName; }).out;
+      otto_tmux = (rustPackages."unknown".otto-tmux."0.1.2" { inherit profileName; }).out;
       serde_json = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".serde_json."1.0.149" { inherit profileName; }).out;
       signal_hook = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".signal-hook."0.3.18" { inherit profileName; }).out;
     };
@@ -556,36 +556,36 @@ in
     };
   });
   
-  "unknown".otto-agent-claude."0.1.0" = overridableMkRustCrate (profileName: rec {
+  "unknown".otto-agent-claude."0.1.2" = overridableMkRustCrate (profileName: rec {
     name = "otto-agent-claude";
-    version = "0.1.0";
+    version = "0.1.2";
     registry = "unknown";
     src = fetchCrateLocal workspaceSrc;
   });
   
-  "unknown".otto-beads."0.1.0" = overridableMkRustCrate (profileName: rec {
+  "unknown".otto-beads."0.1.2" = overridableMkRustCrate (profileName: rec {
     name = "otto-beads";
-    version = "0.1.0";
+    version = "0.1.2";
     registry = "unknown";
     src = fetchCrateLocal workspaceSrc;
   });
   
-  "unknown".otto-core."0.1.0" = overridableMkRustCrate (profileName: rec {
+  "unknown".otto-core."0.1.2" = overridableMkRustCrate (profileName: rec {
     name = "otto-core";
-    version = "0.1.0";
+    version = "0.1.2";
     registry = "unknown";
     src = fetchCrateLocal workspaceSrc;
     dependencies = {
       chrono = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".chrono."0.4.43" { inherit profileName; }).out;
-      otto_agent_claude = (rustPackages."unknown".otto-agent-claude."0.1.0" { inherit profileName; }).out;
-      otto_log = (rustPackages."unknown".otto-log."0.1.0" { inherit profileName; }).out;
-      otto_tmux = (rustPackages."unknown".otto-tmux."0.1.0" { inherit profileName; }).out;
+      otto_agent_claude = (rustPackages."unknown".otto-agent-claude."0.1.2" { inherit profileName; }).out;
+      otto_log = (rustPackages."unknown".otto-log."0.1.2" { inherit profileName; }).out;
+      otto_tmux = (rustPackages."unknown".otto-tmux."0.1.2" { inherit profileName; }).out;
     };
   });
   
-  "unknown".otto-log."0.1.0" = overridableMkRustCrate (profileName: rec {
+  "unknown".otto-log."0.1.2" = overridableMkRustCrate (profileName: rec {
     name = "otto-log";
-    version = "0.1.0";
+    version = "0.1.2";
     registry = "unknown";
     src = fetchCrateLocal workspaceSrc;
     dependencies = {
@@ -593,9 +593,9 @@ in
     };
   });
   
-  "unknown".otto-tmux."0.1.0" = overridableMkRustCrate (profileName: rec {
+  "unknown".otto-tmux."0.1.2" = overridableMkRustCrate (profileName: rec {
     name = "otto-tmux";
-    version = "0.1.0";
+    version = "0.1.2";
     registry = "unknown";
     src = fetchCrateLocal workspaceSrc;
     dependencies = {
@@ -1142,4 +1142,3 @@ in
   });
   
 }
-# corrupted
