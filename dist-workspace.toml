@@ -13,6 +13,10 @@ installers = ["homebrew"]
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu"]
 # Where to host releases
 hosting = "github"
+# release.yml has intentional manual customizations (e.g. the homebrew tap
+# dispatch step) on top of cargo-dist's generated output; tell cargo-dist the
+# divergence is deliberate so `dist plan` doesn't error on it.
+allow-dirty = ["ci"]
 
 [dist.homebrew]
 # The owner/org of the homebrew tap

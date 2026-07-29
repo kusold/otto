@@ -30,7 +30,7 @@ args@{
   cargoConfig ? {},
 }:
 let
-  nixifiedLockHash = "b2f9ce8dafd475442b3d9c88ce0bd9297bcf68098cdce6c0c26ba2209a4edc7d";
+  nixifiedLockHash = "e54942b77203f0abfd1bda69b28b2b3afefc7941be935d5623abd3f4651a524e";
   workspaceSrc = if args.workspaceSrc == null then ./. else args.workspaceSrc;
   currentLockHash = builtins.hashFile "sha256" (workspaceSrc + /Cargo.lock);
   lockHashIgnored = if ignoreLockHash
@@ -617,7 +617,7 @@ in
     dependencies = {
       clap = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".clap."4.5.55" { inherit profileName; }).out;
       itertools = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".itertools."0.14.0" { inherit profileName; }).out;
-      rand = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rand."0.8.5" { inherit profileName; }).out;
+      rand = (rustPackages."registry+https://github.com/rust-lang/crates.io-index".rand."0.8.6" { inherit profileName; }).out;
     };
     buildDependencies = {
       anyhow = (buildRustPackages."registry+https://github.com/rust-lang/crates.io-index".anyhow."1.0.100" { profileName = "__noProfile"; }).out;
@@ -675,11 +675,11 @@ in
     src = fetchCratesIo { inherit name version; sha256 = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"; };
   });
   
-  "registry+https://github.com/rust-lang/crates.io-index".rand."0.8.5" = overridableMkRustCrate (profileName: rec {
+  "registry+https://github.com/rust-lang/crates.io-index".rand."0.8.6" = overridableMkRustCrate (profileName: rec {
     name = "rand";
-    version = "0.8.5";
+    version = "0.8.6";
     registry = "registry+https://github.com/rust-lang/crates.io-index";
-    src = fetchCratesIo { inherit name version; sha256 = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"; };
+    src = fetchCratesIo { inherit name version; sha256 = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"; };
     features = builtins.concatLists [
       [ "alloc" ]
       [ "getrandom" ]
